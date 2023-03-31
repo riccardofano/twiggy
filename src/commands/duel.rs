@@ -33,12 +33,6 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         return Ok(());
     }
 
-    {
-        // Scope to drop the handle to the lock
-        let mut duel_data = custom_data_lock.write().await;
-        duel_data.in_progress = true;
-    }
-
     let challenger_last_loss = match get_last_loss(&ctx, challenger.id.to_string()).await {
         Ok(last_loss) => last_loss,
         Err(e) => {
@@ -84,6 +78,12 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
             .components(|c| c.add_action_row(row))
         })
         .await?;
+
+    {
+        // Scope to drop the handle to the lock
+        let mut duel_data = custom_data_lock.write().await;
+        duel_data.in_progress = true;
+    }
 
     while let Some(interaction) = accept_reply
         .message()
