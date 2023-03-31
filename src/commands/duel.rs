@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use chrono::NaiveDateTime;
-use poise::serenity_prelude::{ButtonStyle, CreateActionRow, User};
+use poise::serenity_prelude::{ButtonStyle, Colour, CreateActionRow, User};
 use rand::Rng;
 use sqlx::QueryBuilder;
 use tokio::sync::RwLock;
@@ -166,7 +166,51 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
     let mut duel_data = custom_data_lock.write().await;
     duel_data.in_progress = false;
 
-    Ok(())
+    return Ok(());
+}
+
+/// Display your duel statistics
+#[poise::command(slash_command)]
+pub async fn duelstats(ctx: Context<'_>) -> Result<()> {
+    let user = ctx.author();
+    let stats = get_duel_stats(&ctx, user.id.to_string()).await?;
+
+    if stats.is_none() {
+        ctx.send(|f| f.content("You have never dueled before.").ephemeral(true))
+            .await?;
+        return Ok(());
+    }
+
+    let stats = stats.unwrap();
+    let current_streak = match (stats.win_streak, stats.loss_streak, stats.draws) {
+        (0, 0, 0) => "You have never dueled before".to_string(),
+        (0, 0, _) => "Your last duel was a draw".to_string(),
+        (0, _, _) => format!("Current streak **{} losses**", stats.loss_streak),
+        (_, 0, _) => format!("Current streak **{} wins**", stats.win_streak),
+        _ => unreachable!(),
+    };
+    let best_streak = format!("Best streak: **{} wins**", stats.win_streak_max);
+    let worst_streak = format!("Worst streak: **{} losses**", stats.loss_streak_max);
+
+    let name = name(user, &ctx).await;
+    let colour = colour(&ctx).await.unwrap_or(0x77618F.into());
+
+    ctx.send(|r| {
+        r.embed(|e| {
+            e.colour(colour)
+                .description(format!("{current_streak}\n{best_streak}\n{worst_streak}"))
+                .author(|a| {
+                    a.icon_url(user.avatar_url().unwrap_or("".into()))
+                        .name(format!(
+                            "{name}'s scoresheet: {}-{}-{}",
+                            stats.wins, stats.losses, stats.draws
+                        ))
+                })
+        })
+    })
+    .await?;
+
+    return Ok(());
 }
 
 async fn nickname(person: &User, ctx: &Context<'_>) -> Option<String> {
@@ -175,7 +219,11 @@ async fn nickname(person: &User, ctx: &Context<'_>) -> Option<String> {
 }
 
 async fn name(person: &User, ctx: &Context<'_>) -> String {
-    nickname(person, ctx).await.unwrap_or(person.name.clone())
+    return nickname(person, ctx).await.unwrap_or(person.name.clone());
+}
+
+async fn colour(ctx: &Context<'_>) -> Option<Colour> {
+    return ctx.author_member().await?.colour(ctx);
 }
 
 async fn get_last_loss(ctx: &Context<'_>, user_id: String) -> Result<NaiveDateTime> {
@@ -229,4 +277,28 @@ async fn update_user_score(ctx: &Context<'_>, user_id: String, score: Score) -> 
     query.build().execute(&ctx.data().database).await?;
 
     Ok(())
+}
+
+struct DuelStats {
+    #[allow(dead_code)]
+    user_id: String,
+    losses: i64,
+    wins: i64,
+    draws: i64,
+    win_streak: i64,
+    loss_streak: i64,
+    win_streak_max: i64,
+    loss_streak_max: i64,
+}
+
+async fn get_duel_stats(ctx: &Context<'_>, user_id: String) -> Result<Option<DuelStats>> {
+    let stats = sqlx::query_as!(
+        DuelStats,
+        r#"SELECT * FROM Duels WHERE user_id = ?"#,
+        user_id
+    )
+    .fetch_optional(&ctx.data().database)
+    .await?;
+
+    Ok(stats)
 }
