@@ -49,11 +49,16 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         }
     };
 
+    let challenger_name = name(challenger, &ctx).await;
+
     let now = chrono::offset::Utc::now().naive_utc();
     let dead_cooldown_duration = chrono::Duration::from_std(DEAD_DUEL_COOLDOWN)?;
     if challenger_last_loss + dead_cooldown_duration > now {
         ctx.send(|f| {
-            f.content("{} you have recently lost a duel. Please try again later.")
+            f.content(format!(
+                "{} you have recently lost a duel. Please try again later.",
+                challenger_name
+            ))
                 .ephemeral(true)
         })
         .await?;
@@ -110,12 +115,21 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         }
 
         let accepter = &interaction.user;
+        let accepter_name = &name(accepter, &ctx).await;
+
         let accepter_last_loss = get_last_loss(&ctx, accepter.id.to_string()).await?;
-        if accepter_last_loss + dead_cooldown_duration > chrono::offset::Utc::now().naive_utc() {
-            ctx.send(|f| {
-                f.content("{} you have recently lost a duel. Please try again later.")
+        let now = chrono::offset::Utc::now().naive_utc();
+        if accepter_last_loss + dead_cooldown_duration > now {
+            interaction
+                .create_interaction_response(&ctx, |r| {
+                    r.interaction_response_data(|d| {
+                        d.content(format!(
+                            "{} you have recently lost a duel. Please try again later.",
+                            accepter_name
+                        ))
                     .ephemeral(true)
             })
+                })
             .await?;
             continue;
         }
