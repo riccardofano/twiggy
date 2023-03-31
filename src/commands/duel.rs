@@ -41,7 +41,7 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
                 challenger.name, e
             );
             ctx.send(|f| {
-                f.content("Something went wrong when trying to join the duel")
+                f.content("Something went wrong when trying to join the duel.")
                     .ephemeral(true)
             })
             .await?;
@@ -59,7 +59,7 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
                 "{} you have recently lost a duel. Please try again later.",
                 challenger_name
             ))
-                .ephemeral(true)
+            .ephemeral(true)
         })
         .await?;
         return Ok(());
@@ -73,7 +73,6 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
             .style(ButtonStyle::Primary)
     });
 
-    let challenger_name = name(challenger, &ctx).await;
     let challenger_id = challenger.id.clone();
     let accept_reply = ctx
         .send(|r| {
@@ -106,11 +105,14 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         }
 
         if !custom_data_lock.read().await.in_progress {
-            ctx.send(|f| {
-                f.content("Someone beat you to the challenge already")
-                    .ephemeral(true)
-            })
-            .await?;
+            interaction
+                .create_interaction_response(&ctx, |r| {
+                    r.interaction_response_data(|d| {
+                        d.content("Someone beat you to the challenge already")
+                            .ephemeral(true)
+                    })
+                })
+                .await?;
             continue;
         }
 
@@ -127,10 +129,10 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
                             "{} you have recently lost a duel. Please try again later.",
                             accepter_name
                         ))
-                    .ephemeral(true)
-            })
+                        .ephemeral(true)
+                    })
                 })
-            .await?;
+                .await?;
             continue;
         }
 
@@ -145,17 +147,19 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         let winner_text = if challeger_score > accepter_score {
             update_user_score(&ctx, challenger.id.to_string(), Score::Win).await?;
             update_user_score(&ctx, accepter.id.to_string(), Score::Loss).await?;
+            update_last_loss(&ctx, accepter.id.to_string()).await?;
+
             format!("{challenger_name} has won!")
         } else if accepter_score > challeger_score {
             update_user_score(&ctx, accepter.id.to_string(), Score::Win).await?;
             update_user_score(&ctx, challenger.id.to_string(), Score::Loss).await?;
-            let name = &nickname(accepter, &ctx)
-                .await
-                .unwrap_or(accepter.name.clone());
-            format!("{name} has won!")
+            update_last_loss(&ctx, challenger.id.to_string()).await?;
+
+            format!("{accepter_name} has won!")
         } else {
             update_user_score(&ctx, challenger.id.to_string(), Score::Draw).await?;
             update_user_score(&ctx, accepter.id.to_string(), Score::Draw).await?;
+
             "It's a draw! Now go sit in a corner for 10 mintues and think about your actions..."
                 .into()
         };
@@ -252,7 +256,18 @@ async fn get_last_loss(ctx: &Context<'_>, user_id: String) -> Result<NaiveDateTi
     .fetch_one(&ctx.data().database)
     .await?;
 
-    Ok(row.last_loss)
+    return Ok(row.last_loss);
+}
+
+async fn update_last_loss(ctx: &Context<'_>, user_id: String) -> Result<()> {
+    sqlx::query!(
+        "UPDATE User SET last_loss = datetime('now') WHERE id = ?",
+        user_id
+    )
+    .execute(&ctx.data().database)
+    .await?;
+
+    return Ok(());
 }
 
 enum Score {
@@ -290,7 +305,7 @@ async fn update_user_score(ctx: &Context<'_>, user_id: String, score: Score) -> 
     query.push_bind(&user_id);
     query.build().execute(&ctx.data().database).await?;
 
-    Ok(())
+    return Ok(());
 }
 
 struct DuelStats {
@@ -314,5 +329,5 @@ async fn get_duel_stats(ctx: &Context<'_>, user_id: String) -> Result<Option<Due
     .fetch_optional(&ctx.data().database)
     .await?;
 
-    Ok(stats)
+    return Ok(stats);
 }
