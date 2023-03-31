@@ -9,7 +9,7 @@ use tokio::sync::RwLock;
 
 use crate::Context;
 
-// const LOSS_COOLDOWN: Duration = Duration::from_secs(10 * 60);
+const LOSS_COOLDOWN: Duration = Duration::from_secs(10 * 60);
 const DEAD_DUEL_COOLDOWN: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Default)]
@@ -129,8 +129,10 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         let accepter_name = &name(accepter, &ctx).await;
 
         let accepter_last_loss = get_last_loss(&ctx, accepter.id.to_string()).await?;
+        let loss_cooldown_duration: chrono::Duration = chrono::Duration::from_std(LOSS_COOLDOWN)?;
         let now = chrono::offset::Utc::now().naive_utc();
-        if accepter_last_loss + dead_cooldown_duration > now {
+
+        if accepter_last_loss + loss_cooldown_duration > now {
             interaction
                 .create_interaction_response(&ctx, |r| {
                     r.interaction_response_data(|d| {
