@@ -2,12 +2,15 @@ use std::time::Duration;
 
 use anyhow::Result;
 use chrono::NaiveDateTime;
-use poise::serenity_prelude::{ButtonStyle, Colour, CreateActionRow, User};
+use poise::serenity_prelude::{ButtonStyle, CreateActionRow};
 use rand::Rng;
 use sqlx::QueryBuilder;
 use tokio::sync::RwLock;
 
-use crate::Context;
+use crate::{
+    common::{colour, ephemeral_interaction_response, ephemeral_message, name},
+    Context,
+};
 
 const LOSS_COOLDOWN: Duration = Duration::from_secs(10 * 60);
 const DEAD_DUEL_COOLDOWN: Duration = Duration::from_secs(10 * 60);
@@ -28,8 +31,7 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         .expect("Expected to have passed a DuelData struct as custom_data");
 
     if custom_data_lock.read().await.in_progress {
-        ctx.send(|f| f.content("A duel is already in progress").ephemeral(true))
-            .await?;
+        ephemeral_message(ctx, "A duel is already in progress").await?;
         return Ok(());
     }
 
@@ -40,11 +42,7 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
                 "Could not retrieve last loss of {} - {:?}",
                 challenger.name, e
             );
-            ctx.send(|f| {
-                f.content("Something went wrong when trying to join the duel.")
-                    .ephemeral(true)
-            })
-            .await?;
+            ephemeral_message(ctx, "Something went wrong when trying to join the duel.").await?;
             return Ok(());
         }
     };
@@ -54,13 +52,13 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
     let now = chrono::offset::Utc::now().naive_utc();
     let dead_cooldown_duration = chrono::Duration::from_std(DEAD_DUEL_COOLDOWN)?;
     if challenger_last_loss + dead_cooldown_duration > now {
-        ctx.send(|f| {
-            f.content(format!(
+        ephemeral_message(
+            ctx,
+            format!(
                 "{} you have recently lost a duel. Please try again later.",
                 challenger_name
-            ))
-            .ephemeral(true)
-        })
+            ),
+        )
         .await?;
         return Ok(());
     }
@@ -103,25 +101,18 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         // `iteraction failed` error but I'll like to find a way to just ignore
         // the click entirely with no response.
         if interaction.user.id == challenger.id {
-            interaction
-                .create_interaction_response(ctx, |r| {
-                    r.interaction_response_data(|d| {
-                        d.content("You cannot join your own duel.").ephemeral(true)
-                    })
-                })
+            ephemeral_interaction_response(&ctx, interaction, "You cannot join your own duel.")
                 .await?;
             continue;
         }
 
         if !custom_data_lock.read().await.in_progress {
-            interaction
-                .create_interaction_response(&ctx, |r| {
-                    r.interaction_response_data(|d| {
-                        d.content("Someone beat you to the challenge already")
-                            .ephemeral(true)
-                    })
-                })
-                .await?;
+            ephemeral_interaction_response(
+                &ctx,
+                interaction,
+                "Someone beat you to the challenge already",
+            )
+            .await?;
             continue;
         }
 
@@ -133,17 +124,11 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         let now = chrono::offset::Utc::now().naive_utc();
 
         if accepter_last_loss + loss_cooldown_duration > now {
-            interaction
-                .create_interaction_response(&ctx, |r| {
-                    r.interaction_response_data(|d| {
-                        d.content(format!(
-                            "{} you have recently lost a duel. Please try again later.",
-                            accepter_name
-                        ))
-                        .ephemeral(true)
-                    })
-                })
-                .await?;
+            let content = format!(
+                "{} you have recently lost a duel. Please try again later.",
+                accepter_name
+            );
+            ephemeral_interaction_response(&ctx, interaction, content).await?;
             continue;
         }
 
@@ -205,8 +190,7 @@ pub async fn duelstats(ctx: Context<'_>) -> Result<()> {
     let stats = get_duel_stats(&ctx, user.id.to_string()).await?;
 
     if stats.is_none() {
-        ctx.send(|f| f.content("You have never dueled before.").ephemeral(true))
-            .await?;
+        ephemeral_message(ctx, "You have never dueled before.").await?;
         return Ok(());
     }
 
@@ -240,19 +224,6 @@ pub async fn duelstats(ctx: Context<'_>) -> Result<()> {
     .await?;
 
     return Ok(());
-}
-
-async fn nickname(person: &User, ctx: &Context<'_>) -> Option<String> {
-    let guild_id = ctx.guild_id()?;
-    return person.nick_in(ctx, guild_id).await;
-}
-
-async fn name(person: &User, ctx: &Context<'_>) -> String {
-    return nickname(person, ctx).await.unwrap_or(person.name.clone());
-}
-
-async fn colour(ctx: &Context<'_>) -> Option<Colour> {
-    return ctx.author_member().await?.colour(ctx);
 }
 
 async fn get_last_loss(ctx: &Context<'_>, user_id: String) -> Result<NaiveDateTime> {

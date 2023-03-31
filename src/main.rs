@@ -1,4 +1,5 @@
 mod commands;
+mod common;
 
 use anyhow::Result;
 use commands::*;

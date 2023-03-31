@@ -1,0 +1,41 @@
+use std::sync::Arc;
+
+use crate::Context;
+use poise::{
+    serenity_prelude::{Colour, Error, MessageComponentInteraction, User},
+    ReplyHandle,
+};
+
+pub async fn ephemeral_message<S: AsRef<str>>(
+    ctx: Context<'_>,
+    content: S,
+) -> Result<ReplyHandle, Error> {
+    return ctx
+        .send(|message| message.content(content.as_ref()).ephemeral(true))
+        .await;
+}
+
+pub async fn ephemeral_interaction_response<S: AsRef<str>>(
+    ctx: &Context<'_>,
+    interaction: Arc<MessageComponentInteraction>,
+    content: S,
+) -> Result<(), Error> {
+    return interaction
+        .create_interaction_response(&ctx, |r| {
+            r.interaction_response_data(|d| d.content(content.as_ref()).ephemeral(true))
+        })
+        .await;
+}
+
+pub async fn nickname(person: &User, ctx: &Context<'_>) -> Option<String> {
+    let guild_id = ctx.guild_id()?;
+    return person.nick_in(ctx, guild_id).await;
+}
+
+pub async fn name(person: &User, ctx: &Context<'_>) -> String {
+    return nickname(person, ctx).await.unwrap_or(person.name.clone());
+}
+
+pub async fn colour(ctx: &Context<'_>) -> Option<Colour> {
+    return ctx.author_member().await?.colour(ctx);
+}
