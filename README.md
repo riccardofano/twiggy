@@ -30,6 +30,8 @@ $Env:DISCORD_TOKEN="<token>"
 
 And then run the bot.
 
-```
+```bash
 cargo run
+# or in the release mode if you're a try-hard
+cargo run --release
 ```
