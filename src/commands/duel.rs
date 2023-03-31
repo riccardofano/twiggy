@@ -73,7 +73,6 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
             .style(ButtonStyle::Primary)
     });
 
-    let challenger_id = challenger.id.clone();
     let accept_reply = ctx
         .send(|r| {
             r.content(format!(
@@ -93,14 +92,24 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         .message()
         .await?
         .await_component_interaction(ctx)
-        // NOTE: trying to join your own duel ends in an `iteraction failed`
-        // something that doesn't happen in the ts version.
-        // checking in filter or inside the interaction doesn't seem to be any different
-        .filter(move |i| i.user.id != challenger_id)
         .timeout(DEAD_DUEL_COOLDOWN)
         .await
     {
         if interaction.data.custom_id != "duel-btn" {
+            continue;
+        }
+
+        // NOTE: responding with an ephemeral message does not trigger the
+        // `iteraction failed` error but I'll like to find a way to just ignore
+        // the click entirely with no response.
+        if interaction.user.id == challenger.id {
+            interaction
+                .create_interaction_response(ctx, |r| {
+                    r.interaction_response_data(|d| {
+                        d.content("You cannot join your own duel.").ephemeral(true)
+                    })
+                })
+                .await?;
             continue;
         }
 
