@@ -36,7 +36,7 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
     {
         // Scope to drop the handle to the lock
         let mut duel_data = custom_data_lock.write().await;
-        *duel_data = DuelData { in_progress: true };
+        duel_data.in_progress = true;
     }
 
     let challenger_last_loss = match get_last_loss(&ctx, challenger.id.to_string()).await {
@@ -55,8 +55,9 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         }
     };
 
+    let now = chrono::offset::Utc::now().naive_utc();
     let dead_cooldown_duration = chrono::Duration::from_std(DEAD_DUEL_COOLDOWN)?;
-    if challenger_last_loss + dead_cooldown_duration > chrono::offset::Utc::now().naive_utc() {
+    if challenger_last_loss + dead_cooldown_duration > now {
         ctx.send(|f| {
             f.content("{} you have recently lost a duel. Please try again later.")
                 .ephemeral(true)
@@ -150,7 +151,7 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
             .await?;
 
         let mut duel_data = custom_data_lock.write().await;
-        *duel_data = DuelData { in_progress: false };
+        duel_data.in_progress = false;
 
         return Ok(());
     }
@@ -163,7 +164,7 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         })
         .await?;
     let mut duel_data = custom_data_lock.write().await;
-    *duel_data = DuelData { in_progress: false };
+    duel_data.in_progress = false;
 
     Ok(())
 }
