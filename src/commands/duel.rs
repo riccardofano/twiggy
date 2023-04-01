@@ -4,7 +4,7 @@ use anyhow::Result;
 use chrono::NaiveDateTime;
 use poise::serenity_prelude::{ButtonStyle, CreateActionRow};
 use rand::Rng;
-use sqlx::QueryBuilder;
+use sqlx::{Connection, QueryBuilder, SqliteConnection};
 use tokio::sync::RwLock;
 
 use crate::{
@@ -35,7 +35,8 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         return Ok(());
     }
 
-    let challenger_last_loss = match get_last_loss(&ctx, challenger.id.to_string()).await {
+    let mut conn = ctx.data().database.acquire().await?;
+    let challenger_last_loss = match get_last_loss(&mut conn, challenger.id.to_string()).await {
         Ok(last_loss) => last_loss,
         Err(e) => {
             eprintln!(
@@ -46,6 +47,11 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
             return Ok(());
         }
     };
+    // NOTE: Manually drop the connection otherwise the connection would be held
+    // for the entirety of the duel duration. Which meant that if, for example,
+    // removing the `duel_in_progress` check, I ran 5 duels at the same time
+    // (the max number of connections in the pool) the bot would stop responding on the 6th one
+    drop(conn);
 
     let challenger_name = name(challenger, &ctx).await;
 
@@ -119,7 +125,10 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         let accepter = &interaction.user;
         let accepter_name = &name(accepter, &ctx).await;
 
-        let accepter_last_loss = get_last_loss(&ctx, accepter.id.to_string()).await?;
+        let mut conn = ctx.data().database.acquire().await?;
+        let accepter_last_loss = get_last_loss(&mut conn, accepter.id.to_string()).await?;
+        drop(conn);
+
         let loss_cooldown_duration: chrono::Duration = chrono::Duration::from_std(LOSS_COOLDOWN)?;
         let now = chrono::offset::Utc::now().naive_utc();
 
@@ -140,25 +149,28 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
             accepter_score = rng.gen_range(0..=100);
         }
 
+        let mut conn = ctx.data().database.acquire().await?;
+        let mut transaction = conn.begin().await?;
         let winner_text = if challeger_score > accepter_score {
-            update_user_score(&ctx, challenger.id.to_string(), Score::Win).await?;
-            update_user_score(&ctx, accepter.id.to_string(), Score::Loss).await?;
-            update_last_loss(&ctx, accepter.id.to_string()).await?;
+            update_user_score(&mut transaction, challenger.id.to_string(), Score::Win).await?;
+            update_user_score(&mut transaction, accepter.id.to_string(), Score::Loss).await?;
+            update_last_loss(&mut transaction, accepter.id.to_string()).await?;
 
             format!("{challenger_name} has won!")
         } else if accepter_score > challeger_score {
-            update_user_score(&ctx, accepter.id.to_string(), Score::Win).await?;
-            update_user_score(&ctx, challenger.id.to_string(), Score::Loss).await?;
-            update_last_loss(&ctx, challenger.id.to_string()).await?;
+            update_user_score(&mut transaction, accepter.id.to_string(), Score::Win).await?;
+            update_user_score(&mut transaction, challenger.id.to_string(), Score::Loss).await?;
+            update_last_loss(&mut transaction, challenger.id.to_string()).await?;
 
             format!("{accepter_name} has won!")
         } else {
-            update_user_score(&ctx, challenger.id.to_string(), Score::Draw).await?;
-            update_user_score(&ctx, accepter.id.to_string(), Score::Draw).await?;
+            update_user_score(&mut transaction, challenger.id.to_string(), Score::Draw).await?;
+            update_user_score(&mut transaction, accepter.id.to_string(), Score::Draw).await?;
 
             "It's a draw! Now go sit in a corner for 10 mintues and think about your actions..."
                 .into()
         };
+        transaction.commit().await?;
 
         accept_reply
             .edit(ctx, |f| f.content(winner_text).components(|c| c))
@@ -187,7 +199,8 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
 #[poise::command(slash_command)]
 pub async fn duelstats(ctx: Context<'_>) -> Result<()> {
     let user = ctx.author();
-    let stats = get_duel_stats(&ctx, user.id.to_string()).await?;
+    let conn = &mut ctx.data().database.acquire().await?;
+    let stats = get_duel_stats(conn, user.id.to_string()).await?;
 
     if stats.is_none() {
         ephemeral_message(ctx, "You have never dueled before.").await?;
@@ -226,7 +239,7 @@ pub async fn duelstats(ctx: Context<'_>) -> Result<()> {
     return Ok(());
 }
 
-async fn get_last_loss(ctx: &Context<'_>, user_id: String) -> Result<NaiveDateTime> {
+async fn get_last_loss(conn: &mut SqliteConnection, user_id: String) -> Result<NaiveDateTime> {
     let row = sqlx::query!(
         r#"
         INSERT OR IGNORE INTO User (id) VALUES (?);
@@ -235,18 +248,18 @@ async fn get_last_loss(ctx: &Context<'_>, user_id: String) -> Result<NaiveDateTi
         user_id,
         user_id
     )
-    .fetch_one(&ctx.data().database)
+    .fetch_one(&mut *conn)
     .await?;
 
     return Ok(row.last_loss);
 }
 
-async fn update_last_loss(ctx: &Context<'_>, user_id: String) -> Result<()> {
+async fn update_last_loss(conn: &mut SqliteConnection, user_id: String) -> Result<()> {
     sqlx::query!(
         "UPDATE User SET last_loss = datetime('now') WHERE id = ?",
         user_id
     )
-    .execute(&ctx.data().database)
+    .execute(&mut *conn)
     .await?;
 
     return Ok(());
@@ -258,7 +271,11 @@ enum Score {
     Draw,
 }
 
-async fn update_user_score(ctx: &Context<'_>, user_id: String, score: Score) -> Result<()> {
+async fn update_user_score(
+    conn: &mut SqliteConnection,
+    user_id: String,
+    score: Score,
+) -> Result<()> {
     let update_query = match score {
         Score::Win => {
             r#"wins = wins + 1,
@@ -285,7 +302,7 @@ async fn update_user_score(ctx: &Context<'_>, user_id: String, score: Score) -> 
         "); UPDATE Duels SET {update_query} WHERE user_id = "
     ));
     query.push_bind(&user_id);
-    query.build().execute(&ctx.data().database).await?;
+    query.build().execute(&mut *conn).await?;
 
     return Ok(());
 }
@@ -302,13 +319,13 @@ struct DuelStats {
     loss_streak_max: i64,
 }
 
-async fn get_duel_stats(ctx: &Context<'_>, user_id: String) -> Result<Option<DuelStats>> {
+async fn get_duel_stats(conn: &mut SqliteConnection, user_id: String) -> Result<Option<DuelStats>> {
     let stats = sqlx::query_as!(
         DuelStats,
         r#"SELECT * FROM Duels WHERE user_id = ?"#,
         user_id
     )
-    .fetch_optional(&ctx.data().database)
+    .fetch_optional(&mut *conn)
     .await?;
 
     return Ok(stats);
