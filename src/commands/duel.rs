@@ -109,7 +109,7 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         }
 
         // NOTE: responding with an ephemeral message does not trigger the
-        // `iteraction failed` error but I'll like to find a way to just ignore
+        // `iteraction failed` error but I'd like to find a way to just ignore
         // the click entirely with no response.
         if interaction.user.id == challenger.id {
             ephemeral_interaction_response(&ctx, interaction, "You cannot join your own duel.")
