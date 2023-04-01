@@ -21,7 +21,11 @@ struct DuelData {
     in_progress: bool,
 }
 
-#[poise::command(slash_command, custom_data = "RwLock::new(DuelData::default())")]
+#[poise::command(
+    slash_command,
+    guild_only,
+    custom_data = "RwLock::new(DuelData::default())"
+)]
 pub async fn duel(ctx: Context<'_>) -> Result<()> {
     let challenger = ctx.author();
 
