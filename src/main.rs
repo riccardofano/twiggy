@@ -34,6 +34,7 @@ async fn main() {
             event_handler: |ctx, event, framework, user_data| {
                 Box::pin(event_event_handler(ctx, event, framework, user_data))
             },
+            on_error: |err| Box::pin(on_error(err)),
             ..Default::default()
         })
         .token(std::env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN"))
@@ -46,6 +47,19 @@ async fn main() {
         });
 
     framework.run().await.unwrap();
+}
+
+async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
+    match error {
+        poise::FrameworkError::Command { error, ctx: _ctx } => {
+            eprintln!("Command error: {}", error.to_string());
+        }
+        _ => {
+            if let Err(e) = poise::builtins::on_error(error).await {
+                eprintln!("Error while trying to handle poise error: {e}")
+            }
+        }
+    }
 }
 
 async fn event_event_handler(
