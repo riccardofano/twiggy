@@ -144,13 +144,10 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
             continue;
         }
 
-        let challenger_score;
-        let accepter_score;
-        {
+        let (challenger_score, accepter_score) = {
             let mut rng = rand::thread_rng();
-            challenger_score = rng.gen_range(0..=100);
-            accepter_score = rng.gen_range(0..=100);
-        }
+            (rng.gen_range(0..=100), rng.gen_range(0..=100))
+        };
 
         let mut conn = ctx.data().database.acquire().await?;
         let mut transaction = conn.begin().await?;
