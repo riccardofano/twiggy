@@ -1,8 +1,8 @@
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 use crate::Context;
 use poise::{
-    serenity_prelude::{Colour, Error, MessageComponentInteraction, User},
+    serenity_prelude::{Colour, Error, Member, MessageComponentInteraction, User},
     ReplyHandle,
 };
 
@@ -36,6 +36,10 @@ pub async fn name(person: &User, ctx: &Context<'_>) -> String {
     return nickname(person, ctx).await.unwrap_or(person.name.clone());
 }
 
+pub async fn member<'a>(ctx: &'a Context<'_>) -> Option<Cow<'a, Member>> {
+    return ctx.author_member().await;
+}
+
 pub async fn colour(ctx: &Context<'_>) -> Option<Colour> {
-    return ctx.author_member().await?.colour(ctx);
+    return member(ctx).await?.colour(ctx);
 }

@@ -1,19 +1,20 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use chrono::NaiveDateTime;
+use chrono::{NaiveDateTime, Utc};
 use poise::serenity_prelude::{ButtonStyle, CreateActionRow};
 use rand::Rng;
 use sqlx::{Connection, QueryBuilder, SqliteConnection};
 use tokio::sync::RwLock;
 
 use crate::{
-    common::{colour, ephemeral_interaction_response, ephemeral_message, name},
+    common::{colour, ephemeral_interaction_response, ephemeral_message, member, name},
     Context,
 };
 
+const DEAD_DUEL_COOLDOWN: Duration = Duration::from_secs(5 * 60);
 const LOSS_COOLDOWN: Duration = Duration::from_secs(10 * 60);
-const DEAD_DUEL_COOLDOWN: Duration = Duration::from_secs(10 * 60);
+const TIMEOUT_DURATION: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Default)]
 struct DuelData {
@@ -55,9 +56,9 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
 
     let challenger_name = name(challenger, &ctx).await;
 
-    let now = chrono::offset::Utc::now().naive_utc();
-    let dead_cooldown_duration = chrono::Duration::from_std(DEAD_DUEL_COOLDOWN)?;
-    if challenger_last_loss + dead_cooldown_duration > now {
+    let now = Utc::now().naive_utc();
+    let loss_cooldown_duration = chrono::Duration::from_std(LOSS_COOLDOWN)?;
+    if challenger_last_loss + loss_cooldown_duration > now {
         ephemeral_message(
             ctx,
             format!(
@@ -129,9 +130,7 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         let accepter_last_loss = get_last_loss(&mut conn, accepter.id.to_string()).await?;
         drop(conn);
 
-        let loss_cooldown_duration: chrono::Duration = chrono::Duration::from_std(LOSS_COOLDOWN)?;
-        let now = chrono::offset::Utc::now().naive_utc();
-
+        let now = Utc::now().naive_utc();
         if accepter_last_loss + loss_cooldown_duration > now {
             let content = format!(
                 "{} you have recently lost a duel. Please try again later.",
@@ -141,23 +140,23 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
             continue;
         }
 
-        let challeger_score;
+        let challenger_score;
         let accepter_score;
         {
             let mut rng = rand::thread_rng();
-            challeger_score = rng.gen_range(0..=100);
+            challenger_score = rng.gen_range(0..=100);
             accepter_score = rng.gen_range(0..=100);
         }
 
         let mut conn = ctx.data().database.acquire().await?;
         let mut transaction = conn.begin().await?;
-        let winner_text = if challeger_score > accepter_score {
+        let winner_text = if challenger_score > accepter_score {
             update_user_score(&mut transaction, challenger.id.to_string(), Score::Win).await?;
             update_user_score(&mut transaction, accepter.id.to_string(), Score::Loss).await?;
             update_last_loss(&mut transaction, accepter.id.to_string()).await?;
 
             format!("{challenger_name} has won!")
-        } else if accepter_score > challeger_score {
+        } else if accepter_score > challenger_score {
             update_user_score(&mut transaction, accepter.id.to_string(), Score::Win).await?;
             update_user_score(&mut transaction, challenger.id.to_string(), Score::Loss).await?;
             update_last_loss(&mut transaction, challenger.id.to_string()).await?;
@@ -166,6 +165,20 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         } else {
             update_user_score(&mut transaction, challenger.id.to_string(), Score::Draw).await?;
             update_user_score(&mut transaction, accepter.id.to_string(), Score::Draw).await?;
+
+            // NOTE: interaction fails if the user is the owner of the server
+            let timeout_end_time = Utc::now() + chrono::Duration::from_std(TIMEOUT_DURATION)?;
+            if let Some(mut challenger_as_member) = member(&ctx).await {
+                challenger_as_member
+                    .to_mut()
+                    .disable_communication_until_datetime(ctx, timeout_end_time.into())
+                    .await?;
+            };
+            if let Some(mut accepter_as_member) = interaction.member.clone() {
+                accepter_as_member
+                    .disable_communication_until_datetime(ctx, timeout_end_time.into())
+                    .await?;
+            };
 
             "It's a draw! Now go sit in a corner for 10 mintues and think about your actions..."
                 .into()
