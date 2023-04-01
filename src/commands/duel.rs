@@ -186,7 +186,9 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         transaction.commit().await?;
 
         accept_reply
-            .edit(ctx, |f| f.content(winner_text).components(|c| c))
+            .edit(ctx, |f| f.content(
+                format!("{accepter_name} has rolled a {accepter_score} and {challenger_name} has rolled a {challenger_score}. {winner_text}")
+            ).components(|c| c))
             .await?;
 
         let mut duel_data = custom_data_lock.write().await;
