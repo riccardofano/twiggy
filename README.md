@@ -1,5 +1,8 @@
 # Rust port of [TwiggyBot](https://github.com/Brexbot/TwiggyBot) just for fun
 
+I was curious to see what the bot would look like in Rust, after someone mentioned the "rewrite it in rust" meme for the bot.  
+I'm pretty surprised by the result, I honestly expected it to be a lot more verbose.
+
 ## How to run
 
 Prerequisites:
