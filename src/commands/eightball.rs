@@ -2,7 +2,7 @@ use crate::Context;
 use anyhow::Result;
 use rand::seq::SliceRandom;
 
-const REPLIES: &'static [&str] = &[
+const REPLIES: &[&str] = &[
     "It is certain.",
     "It is decidedly so.",
     "Without a doubt.",

@@ -33,7 +33,9 @@ pub async fn nickname(person: &User, ctx: &Context<'_>) -> Option<String> {
 }
 
 pub async fn name(person: &User, ctx: &Context<'_>) -> String {
-    return nickname(person, ctx).await.unwrap_or(person.name.clone());
+    return nickname(person, ctx)
+        .await
+        .unwrap_or_else(|| person.name.clone());
 }
 
 pub async fn member<'a>(ctx: &'a Context<'_>) -> Option<Cow<'a, Member>> {

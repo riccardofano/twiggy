@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{cmp::Ordering, time::Duration};
 
 use anyhow::Result;
 use chrono::{NaiveDateTime, Utc};
@@ -151,38 +151,42 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
 
         let mut conn = ctx.data().database.acquire().await?;
         let mut transaction = conn.begin().await?;
-        let winner_text = if challenger_score > accepter_score {
-            update_user_score(&mut transaction, challenger.id.to_string(), Score::Win).await?;
-            update_user_score(&mut transaction, accepter.id.to_string(), Score::Loss).await?;
-            update_last_loss(&mut transaction, accepter.id.to_string()).await?;
+        let winner_text = match challenger_score.cmp(&accepter_score) {
+            Ordering::Greater => {
+                update_user_score(&mut transaction, challenger.id.to_string(), Score::Win).await?;
+                update_user_score(&mut transaction, accepter.id.to_string(), Score::Loss).await?;
+                update_last_loss(&mut transaction, accepter.id.to_string()).await?;
 
-            format!("{challenger_name} has won!")
-        } else if accepter_score > challenger_score {
-            update_user_score(&mut transaction, accepter.id.to_string(), Score::Win).await?;
-            update_user_score(&mut transaction, challenger.id.to_string(), Score::Loss).await?;
-            update_last_loss(&mut transaction, challenger.id.to_string()).await?;
+                format!("{challenger_name} has won!")
+            }
+            Ordering::Less => {
+                update_user_score(&mut transaction, accepter.id.to_string(), Score::Win).await?;
+                update_user_score(&mut transaction, challenger.id.to_string(), Score::Loss).await?;
+                update_last_loss(&mut transaction, challenger.id.to_string()).await?;
 
-            format!("{accepter_name} has won!")
-        } else {
-            update_user_score(&mut transaction, challenger.id.to_string(), Score::Draw).await?;
-            update_user_score(&mut transaction, accepter.id.to_string(), Score::Draw).await?;
+                format!("{accepter_name} has won!")
+            }
+            Ordering::Equal => {
+                update_user_score(&mut transaction, challenger.id.to_string(), Score::Draw).await?;
+                update_user_score(&mut transaction, accepter.id.to_string(), Score::Draw).await?;
 
-            // NOTE: interaction fails if the user is the owner of the server
-            let timeout_end_time = Utc::now() + chrono::Duration::from_std(TIMEOUT_DURATION)?;
-            if let Some(mut challenger_as_member) = member(&ctx).await {
-                challenger_as_member
-                    .to_mut()
-                    .disable_communication_until_datetime(ctx, timeout_end_time.into())
-                    .await?;
-            };
-            if let Some(mut accepter_as_member) = interaction.member.clone() {
-                accepter_as_member
-                    .disable_communication_until_datetime(ctx, timeout_end_time.into())
-                    .await?;
-            };
+                // NOTE: interaction fails if the user is the owner of the server
+                let timeout_end_time = Utc::now() + chrono::Duration::from_std(TIMEOUT_DURATION)?;
+                if let Some(mut challenger_as_member) = member(&ctx).await {
+                    challenger_as_member
+                        .to_mut()
+                        .disable_communication_until_datetime(ctx, timeout_end_time.into())
+                        .await?;
+                };
+                if let Some(mut accepter_as_member) = interaction.member.clone() {
+                    accepter_as_member
+                        .disable_communication_until_datetime(ctx, timeout_end_time.into())
+                        .await?;
+                };
 
-            "It's a draw! Now go sit in a corner for 10 mintues and think about your actions..."
-                .into()
+                "It's a draw! Now go sit in a corner for 10 mintues and think about your actions..."
+                    .into()
+            }
         };
         transaction.commit().await?;
 
@@ -208,7 +212,7 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
     let mut duel_data = custom_data_lock.write().await;
     duel_data.in_progress = false;
 
-    return Ok(());
+    Ok(())
 }
 
 /// Display your duel statistics
@@ -235,14 +239,14 @@ pub async fn duelstats(ctx: Context<'_>) -> Result<()> {
     let worst_streak = format!("Worst streak: **{} losses**", stats.loss_streak_max);
 
     let name = name(user, &ctx).await;
-    let colour = colour(&ctx).await.unwrap_or(0x77618F.into());
+    let colour = colour(&ctx).await.unwrap_or_else(|| 0x77618F.into());
 
     ctx.send(|r| {
         r.embed(|e| {
             e.colour(colour)
                 .description(format!("{current_streak}\n{best_streak}\n{worst_streak}"))
                 .author(|a| {
-                    a.icon_url(user.avatar_url().unwrap_or("".into()))
+                    a.icon_url(user.avatar_url().unwrap_or_else(|| "".into()))
                         .name(format!(
                             "{name}'s scoresheet: {}-{}-{}",
                             stats.wins, stats.losses, stats.draws
@@ -252,7 +256,7 @@ pub async fn duelstats(ctx: Context<'_>) -> Result<()> {
     })
     .await?;
 
-    return Ok(());
+    Ok(())
 }
 
 async fn get_last_loss(conn: &mut SqliteConnection, user_id: String) -> Result<NaiveDateTime> {
@@ -267,7 +271,7 @@ async fn get_last_loss(conn: &mut SqliteConnection, user_id: String) -> Result<N
     .fetch_one(&mut *conn)
     .await?;
 
-    return Ok(row.last_loss);
+    Ok(row.last_loss)
 }
 
 async fn update_last_loss(conn: &mut SqliteConnection, user_id: String) -> Result<()> {
@@ -278,7 +282,7 @@ async fn update_last_loss(conn: &mut SqliteConnection, user_id: String) -> Resul
     .execute(&mut *conn)
     .await?;
 
-    return Ok(());
+    Ok(())
 }
 
 enum Score {
@@ -320,7 +324,7 @@ async fn update_user_score(
     query.push_bind(&user_id);
     query.build().execute(&mut *conn).await?;
 
-    return Ok(());
+    Ok(())
 }
 
 struct DuelStats {
@@ -344,5 +348,5 @@ async fn get_duel_stats(conn: &mut SqliteConnection, user_id: String) -> Result<
     .fetch_optional(&mut *conn)
     .await?;
 
-    return Ok(stats);
+    Ok(stats)
 }

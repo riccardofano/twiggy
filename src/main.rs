@@ -52,7 +52,7 @@ async fn main() {
 async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
     match error {
         poise::FrameworkError::Command { error, ctx: _ctx } => {
-            eprintln!("Command error: {}", error.to_string());
+            eprintln!("Command error: {}", error);
         }
         _ => {
             if let Err(e) = poise::builtins::on_error(error).await {
@@ -68,19 +68,16 @@ async fn event_event_handler(
     framework: poise::FrameworkContext<'_, Data, Error>,
     _user_data: &Data,
 ) -> Result<(), Error> {
-    match event {
-        poise::Event::Ready { data_about_bot } => {
-            println!("{} is connected!", data_about_bot.user.name);
-            let commands = &framework.options().commands;
-            let create_commands = poise::builtins::create_application_commands(&commands);
+    if let poise::Event::Ready { data_about_bot } = event {
+        println!("{} is connected!", data_about_bot.user.name);
+        let commands = &framework.options().commands;
+        let create_commands = poise::builtins::create_application_commands(commands);
 
-            serenity::Command::set_global_application_commands(ctx, |builder| {
-                *builder = create_commands;
-                builder
-            })
-            .await?;
-        }
-        _ => {}
+        serenity::Command::set_global_application_commands(ctx, |builder| {
+            *builder = create_commands;
+            builder
+        })
+        .await?;
     }
 
     Ok(())
