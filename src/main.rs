@@ -25,7 +25,7 @@ async fn main() {
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![eightball(), duel(), duelstats()],
+            commands: vec![rpg(), eightball(), duel(), duelstats()],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some(String::from(">")),
                 mention_as_prefix: false,
@@ -63,21 +63,13 @@ async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
 }
 
 async fn event_event_handler(
-    ctx: &serenity::Context,
+    _ctx: &serenity::Context,
     event: &poise::Event<'_>,
-    framework: poise::FrameworkContext<'_, Data, Error>,
+    _framework: poise::FrameworkContext<'_, Data, Error>,
     _user_data: &Data,
 ) -> Result<(), Error> {
     if let poise::Event::Ready { data_about_bot } = event {
         println!("{} is connected!", data_about_bot.user.name);
-        let commands = &framework.options().commands;
-        let create_commands = poise::builtins::create_application_commands(commands);
-
-        serenity::Command::set_global_application_commands(ctx, |builder| {
-            *builder = create_commands;
-            builder
-        })
-        .await?;
     }
 
     Ok(())

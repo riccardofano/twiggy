@@ -12,6 +12,7 @@ sqlx = { version = "0.6.3", features = ["runtime-tokio-rustls", "sqlite", "offli
 anyhow = "1.0.70"
 rand = "0.8.5"
 chrono = { version = "0.4.24", features = ["clock"] }
+rand_seeder = "0.2.3"
 
 [dependencies.serenity]
 version = "0.11.5"
