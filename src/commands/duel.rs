@@ -63,11 +63,12 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
     let now = Utc::now().naive_utc();
     let loss_cooldown_duration = chrono::Duration::from_std(LOSS_COOLDOWN)?;
     if challenger_last_loss + loss_cooldown_duration > now {
+        let time_until_duel = (challenger_last_loss + loss_cooldown_duration).timestamp();
         ephemeral_message(
             ctx,
             format!(
-                "{} you have recently lost a duel. Please try again later.",
-                challenger_name
+                "{} you have recently lost a duel. Please try again <t:{}:R>.",
+                challenger_name, time_until_duel
             ),
         )
         .await?;
@@ -136,9 +137,10 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
 
         let now = Utc::now().naive_utc();
         if accepter_last_loss + loss_cooldown_duration > now {
+            let time_until_duel = (accepter_last_loss + loss_cooldown_duration).timestamp();
             let content = format!(
-                "{} you have recently lost a duel. Please try again later.",
-                accepter_name
+                "{} you have recently lost a duel. Please try again <t:{}:R>.",
+                accepter_name, time_until_duel
             );
             ephemeral_interaction_response(&ctx, interaction, content).await?;
             continue;
