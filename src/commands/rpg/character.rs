@@ -41,7 +41,7 @@ pub struct Character {
 }
 
 impl Character {
-    pub fn new(user_id: u64, name: &str, seed: Option<&str>) -> Self {
+    pub fn new(user_id: u64, name: &str, seed: &Option<&str>) -> Self {
         let mut rng = match seed {
             Some(s) => Seeder::from(&s).make_rng(),
             None => StdRng::seed_from_u64(rand::random::<u64>()),
@@ -76,13 +76,13 @@ impl Character {
         let stats = HashMap::from(DEFAULT_STATS);
         let mut stats: HashMap<Stat, usize> = stats
             .into_keys()
-            .map(|k| (k, pick_best_x_dice_rolls(6, 3, 3, seed)))
+            .map(|k| (k, pick_best_x_dice_rolls(6, 3, 3, *seed)))
             .collect();
         for stat in specie.stat_bonuses.iter() {
             *stats.get_mut(stat).expect("Expected to have all the stats") += 1;
         }
 
-        let hp = pick_best_x_dice_rolls(HIT_DICE_SIDES, HIT_DICE_POOL, HIT_DICE, seed) as isize;
+        let hp = pick_best_x_dice_rolls(HIT_DICE_SIDES, HIT_DICE_POOL, HIT_DICE, *seed) as isize;
 
         Self {
             hp,

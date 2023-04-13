@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::{
     commands::rpg::fight::RPGFight,
-    common::{ephemeral_interaction_response, ephemeral_message, name, nickname},
+    common::{ephemeral_interaction_response, ephemeral_message, nickname},
     Context,
 };
 use anyhow::Result;
@@ -41,14 +41,13 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
     }
 
     let challenger = ctx.author();
-    let nick = nickname(challenger, &ctx).await;
-    let challenger_seed = nick.clone();
-    let challenger_name = nick.unwrap_or_else(|| challenger.name.clone());
+    let challenger_nick = nickname(challenger, &ctx).await;
+    let challenger_name = challenger_nick.as_deref().unwrap_or(&challenger.name);
 
     let challenger_character = Character::new(
         challenger.id.0,
-        &challenger_name,
-        challenger_seed.as_deref(),
+        challenger_name,
+        &challenger_nick.as_deref(),
     );
 
     let mut row = CreateActionRow::default();
@@ -102,11 +101,10 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         }
 
         let accepter = &interaction.user;
-        let nick = nickname(challenger, &ctx).await;
-        let accepter_seed = nick.clone();
-        let accepter_name = name(accepter, &ctx).await;
+        let accepter_nick = nickname(accepter, &ctx).await;
+        let accepter_name = accepter_nick.as_deref().unwrap_or(&challenger.name);
         let accepter_character =
-            Character::new(accepter.id.0, &accepter_name, accepter_seed.as_deref());
+            Character::new(accepter.id.0, accepter_name, &accepter_nick.as_deref());
 
         let mut fight = RPGFight::new(challenger_character, accepter_character);
         fight.fight();
