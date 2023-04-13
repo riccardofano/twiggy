@@ -3,12 +3,12 @@ use rand::seq::SliceRandom;
 #[allow(clippy::upper_case_acronyms)]
 #[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub enum Stat {
-    CHR,
-    CON,
-    DEX,
-    INT,
     STR,
+    DEX,
+    CON,
+    INT,
     WIS,
+    CHR,
 }
 
 impl Stat {
@@ -885,7 +885,7 @@ pub enum VictoryKind {
 
 impl VictoryKind {
     pub fn get_texts(&self) -> &'static [&'static str] {
-        VICTORY_TEXTS[*self as usize - 1]
+        VICTORY_TEXTS[*self as usize]
     }
 }
 
