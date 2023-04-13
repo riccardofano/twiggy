@@ -7,7 +7,7 @@ use super::character::Character;
 use super::data::{Stat, VictoryKind};
 use super::util::pick_best_x_dice_rolls;
 
-const OUT_WIDTH: usize = 24;
+const OUTPUT_WIDTH: usize = 24;
 const MAX_ROUNDS: usize = 10;
 
 pub enum FightResult {
@@ -55,9 +55,9 @@ impl RPGFight {
             rounds += 1;
         }
 
-        let (result, victor, loser) = if self.challenger.hp == 0 {
+        let (result, victor, loser) = if self.accepter.hp == 0 {
             (FightResult::ChallengerWin, &self.challenger, &self.accepter)
-        } else if self.accepter.hp == 0 {
+        } else if self.challenger.hp == 0 {
             (FightResult::AccepterWin, &self.accepter, &self.challenger)
         } else {
             return FightResult::Draw;
@@ -133,7 +133,7 @@ impl RPGFight {
 
     fn intro(&self) -> String {
         let mut res = String::new();
-        let pad = " ".repeat(OUT_WIDTH / 2);
+        let pad = " ".repeat(OUTPUT_WIDTH / 2);
         res += &format!("{pad}+-------+{pad}\n");
         res += &format!("{pad}|  vs.  |{pad}\n");
         res += &format!("{pad}+-------+{pad}\n");
