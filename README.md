@@ -18,7 +18,7 @@ cargo install sqlx-cli
 Then create the database and run the migrations with:
 
 ```
-sqlx create database
+sqlx database create
 sqlx migrate run
 ```
 
