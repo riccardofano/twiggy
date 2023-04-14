@@ -192,11 +192,12 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         };
         transaction.commit().await?;
 
-        accept_reply
-            .edit(ctx, |f| f.content(
+        interaction.create_interaction_response(ctx, |r| {
+            r.kind(poise::serenity_prelude::InteractionResponseType::UpdateMessage)
+            .interaction_response_data(|d| d.content(
                 format!("{accepter_name} has rolled a {accepter_score} and {challenger_name} has rolled a {challenger_score}. {winner_text}")
             ).components(|c| c))
-            .await?;
+        }).await?;
 
         let mut duel_data = custom_data_lock.write().await;
         duel_data.in_progress = false;
