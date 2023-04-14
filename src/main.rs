@@ -1,12 +1,15 @@
 mod commands;
 mod common;
 
+use std::collections::HashMap;
+
 use anyhow::Result;
 use commands::*;
-use poise::serenity_prelude as serenity;
+use poise::serenity_prelude::{self as serenity, Mutex};
 
 pub struct Data {
     database: sqlx::SqlitePool,
+    rpg_summary_cache: Mutex<HashMap<u64, String>>,
 }
 pub type Context<'a> = poise::Context<'a, Data, anyhow::Error>;
 pub type Error = anyhow::Error;
@@ -42,7 +45,10 @@ async fn main() {
         .setup(|ctx, _ready, framework| {
             Box::pin(async move {
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-                Ok(Data { database })
+                Ok(Data {
+                    database,
+                    rpg_summary_cache: Mutex::new(HashMap::new()),
+                })
             })
         });
 
@@ -63,13 +69,15 @@ async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
 }
 
 async fn event_event_handler(
-    _ctx: &serenity::Context,
+    ctx: &serenity::Context,
     event: &poise::Event<'_>,
     _framework: poise::FrameworkContext<'_, Data, Error>,
-    _user_data: &Data,
+    user_data: &Data,
 ) -> Result<(), Error> {
     if let poise::Event::Ready { data_about_bot } = event {
         println!("{} is connected!", data_about_bot.user.name);
+
+        setup_rpg_summary(ctx, user_data).await?;
     }
 
     Ok(())

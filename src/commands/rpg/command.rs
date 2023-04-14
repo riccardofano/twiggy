@@ -1,12 +1,16 @@
 use std::time::Duration;
 
 use crate::{
-    commands::rpg::fight::RPGFight,
+    commands::rpg::fight::{FightResult, RPGFight},
     common::{ephemeral_interaction_response, ephemeral_message, nickname},
-    Context,
+    Context, Data,
 };
 use anyhow::Result;
 use poise::serenity_prelude::{ButtonStyle, CreateActionRow};
+use poise::{
+    futures_util::StreamExt,
+    serenity_prelude::{self as serenity, ComponentInteractionCollectorBuilder},
+};
 use tokio::sync::RwLock;
 
 use super::character::Character;
@@ -68,14 +72,13 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         .await?;
 
     {
-        // Scope to drop the handle to the lock
         let mut duel_data = custom_data_lock.write().await;
         duel_data.in_progress = true;
     }
 
-    while let Some(interaction) = accept_reply
-        .message()
-        .await?
+    let reply_msg = accept_reply.message().await?;
+
+    while let Some(interaction) = reply_msg
         .await_component_interaction(ctx)
         .timeout(DEAD_DUEL_COOLDOWN)
         .await
@@ -83,7 +86,6 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         if interaction.data.custom_id != "duel-btn" {
             continue;
         }
-
         if interaction.user.id == challenger.id {
             ephemeral_interaction_response(&ctx, interaction, "You cannot join your own duel.")
                 .await?;
@@ -107,14 +109,81 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
             Character::new(accepter.id.0, accepter_name, &accepter_nick.as_deref());
 
         let mut fight = RPGFight::new(challenger_character, accepter_character);
-        fight.fight();
 
-        accept_reply
-            .edit(ctx, |r| r.content(fight.to_string()).components(|c| c))
+        // TODO: update db with fight results
+        match fight.fight() {
+            FightResult::ChallengerWin => {}
+            FightResult::AccepterWin => {}
+            FightResult::Draw => {}
+        };
+
+        let mut summary_row = CreateActionRow::default();
+        summary_row.create_button(|f| {
+            f.custom_id("rpg-summary")
+                .emoji('📖')
+                .label("See summary".to_string())
+                .style(ButtonStyle::Secondary)
+        });
+
+        interaction
+            .create_interaction_response(ctx, |r| {
+                r.kind(serenity::InteractionResponseType::UpdateMessage)
+                    .interaction_response_data(|d| {
+                        d.content(fight.summary())
+                            .components(|c| c.set_action_row(summary_row))
+                    })
+            })
             .await?;
+
+        let mut cmd_data = custom_data_lock.write().await;
+        cmd_data.in_progress = false;
+
+        ctx.data()
+            .rpg_summary_cache
+            .lock()
+            .await
+            .insert(reply_msg.id.0, fight.to_string());
 
         return Ok(());
     }
+
+    accept_reply
+        .edit(ctx, |r| {
+            r.content(format!("{challenger_name} failed to find someone to duel."))
+                .components(|c| c)
+        })
+        .await?;
+
+    let mut data = custom_data_lock.write().await;
+    data.in_progress = false;
+
+    Ok(())
+}
+
+pub async fn setup_rpg_summary(ctx: &serenity::Context, user_data: &Data) -> Result<()> {
+    let collector = ComponentInteractionCollectorBuilder::new(ctx)
+        .filter(|f| f.data.custom_id == "rpg-summary")
+        .build();
+
+    let _: Vec<_> = collector
+        .then(|interaction| async move {
+            let data = user_data.rpg_summary_cache.lock().await;
+            let summary = data.get(&interaction.message.id.0);
+
+            let response = match summary {
+                Some(r) => r,
+                None => "Could not find the summary for that fight.",
+            };
+
+            let _result = interaction
+                .create_interaction_response(&ctx, |r| {
+                    r.interaction_response_data(|d| d.content(response).ephemeral(true))
+                })
+                .await;
+            interaction
+        })
+        .collect()
+        .await;
 
     Ok(())
 }

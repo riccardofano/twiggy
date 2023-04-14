@@ -20,6 +20,7 @@ pub struct RPGFight {
     challenger: Character,
     accepter: Character,
     log: String,
+    summary: String,
 }
 
 impl RPGFight {
@@ -28,6 +29,7 @@ impl RPGFight {
             challenger,
             accepter,
             log: String::new(),
+            summary: String::new(),
         }
     }
 
@@ -73,13 +75,11 @@ impl RPGFight {
         };
 
         let mut rng = rand::thread_rng();
-        let summary = result_texts
+        self.summary = result_texts
             .choose(&mut rng)
             .expect("Expected to have at least one result text")
             .replace("VICTOR", &format!("**{}**", victor.name))
             .replace("LOSER", &format!("**{}**", loser.name));
-
-        self.log += &summary;
 
         result
     }
@@ -140,6 +140,10 @@ impl RPGFight {
 
         res
     }
+
+    pub fn summary(&self) -> &str {
+        &self.summary
+    }
 }
 
 impl Display for RPGFight {
@@ -149,6 +153,7 @@ impl Display for RPGFight {
         writeln!(f, "{}", self.intro())?;
         writeln!(f, "{}", self.accepter)?;
         writeln!(f, "```")?;
-        writeln!(f, "{}", self.log)
+        writeln!(f, "{}", self.log)?;
+        writeln!(f, "{}", self.summary)
     }
 }
