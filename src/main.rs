@@ -1,11 +1,11 @@
 mod commands;
 mod common;
 
-use std::collections::HashMap;
-
 use anyhow::Result;
 use commands::*;
-use poise::serenity_prelude::{self as serenity, Mutex};
+use poise::serenity_prelude as serenity;
+use poise::serenity_prelude::Mutex;
+use std::collections::HashMap;
 
 pub struct Data {
     database: sqlx::SqlitePool,

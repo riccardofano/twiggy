@@ -1,19 +1,15 @@
-use std::time::Duration;
-
-use crate::{
-    commands::rpg::fight::{FightResult, RPGFight},
-    common::{ephemeral_interaction_response, ephemeral_message, nickname},
-    Context, Data,
-};
-use anyhow::Result;
-use poise::serenity_prelude::{ButtonStyle, CreateActionRow};
-use poise::{
-    futures_util::StreamExt,
-    serenity_prelude::{self as serenity, ComponentInteractionCollectorBuilder},
-};
-use tokio::sync::RwLock;
-
 use super::character::Character;
+
+use crate::commands::rpg::fight::{FightResult, RPGFight};
+use crate::common::{ephemeral_interaction_response, ephemeral_message, nickname};
+use crate::{Context, Data};
+
+use anyhow::Result;
+use poise::futures_util::StreamExt;
+use poise::serenity_prelude as serenity;
+use poise::serenity_prelude::{ButtonStyle, ComponentInteractionCollectorBuilder, CreateActionRow};
+use std::time::Duration;
+use tokio::sync::RwLock;
 
 const DEAD_DUEL_COOLDOWN: Duration = Duration::from_secs(5 * 60);
 

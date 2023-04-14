@@ -1,16 +1,14 @@
-use std::{cmp::Ordering, time::Duration};
+use crate::common::{colour, ephemeral_interaction_response, ephemeral_message, member, name};
+use crate::Context;
 
 use anyhow::Result;
 use chrono::{NaiveDateTime, Utc};
 use poise::serenity_prelude::{ButtonStyle, CreateActionRow};
 use rand::Rng;
 use sqlx::{Connection, QueryBuilder, SqliteConnection};
+use std::cmp::Ordering;
+use std::time::Duration;
 use tokio::sync::RwLock;
-
-use crate::{
-    common::{colour, ephemeral_interaction_response, ephemeral_message, member, name},
-    Context,
-};
 
 const DEAD_DUEL_COOLDOWN: Duration = Duration::from_secs(5 * 60);
 const LOSS_COOLDOWN: Duration = Duration::from_secs(10 * 60);

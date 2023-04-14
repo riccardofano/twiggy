@@ -1,5 +1,5 @@
 mod duel;
-pub mod eightball;
+mod eightball;
 mod rpg;
 
 pub use duel::*;

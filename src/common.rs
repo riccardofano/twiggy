@@ -1,10 +1,9 @@
-use std::{borrow::Cow, sync::Arc};
-
 use crate::Context;
-use poise::{
-    serenity_prelude::{Colour, Error, Member, MessageComponentInteraction, User},
-    ReplyHandle,
-};
+
+use poise::serenity_prelude::{Colour, Error, Member, MessageComponentInteraction, User};
+use poise::ReplyHandle;
+use std::borrow::Cow;
+use std::sync::Arc;
 
 pub async fn ephemeral_message<S: AsRef<str>>(
     ctx: Context<'_>,

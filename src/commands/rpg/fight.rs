@@ -1,11 +1,10 @@
-use std::cmp;
-use std::fmt::Display;
-
-use rand::seq::SliceRandom;
-
 use super::character::Character;
 use super::data::{Stat, VictoryKind};
 use super::util::pick_best_x_dice_rolls;
+
+use rand::seq::SliceRandom;
+use std::cmp;
+use std::fmt::Display;
 
 const OUTPUT_WIDTH: usize = 24;
 const MAX_ROUNDS: usize = 10;

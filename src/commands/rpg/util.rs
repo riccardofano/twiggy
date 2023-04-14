@@ -1,4 +1,5 @@
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use rand_seeder::Seeder;
 
 pub fn pick_best_x_dice_rolls(
