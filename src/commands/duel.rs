@@ -93,7 +93,7 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         .await?;
 
     {
-        // Scope to drop the handle to the lock
+        // NOTE: Scope to drop the handle to the lock
         let mut duel_data = custom_data_lock.write().await;
         duel_data.in_progress = true;
     }
@@ -208,7 +208,7 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
     accept_reply
         .edit(ctx, |f| {
             f.content(format!("{challenger_name} failed to find someone to duel."))
-                // no components
+                // NOTE: this is how you remove components
                 .components(|c| c)
         })
         .await?;
