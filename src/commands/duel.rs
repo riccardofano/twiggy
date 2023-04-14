@@ -1,4 +1,6 @@
-use crate::common::{colour, ephemeral_interaction_response, ephemeral_message, member, name};
+use crate::common::{
+    colour, ephemeral_interaction_response, ephemeral_message, member, name, Score,
+};
 use crate::Context;
 
 use anyhow::Result;
@@ -284,12 +286,6 @@ async fn update_last_loss(conn: &mut SqliteConnection, user_id: String) -> Resul
     .await?;
 
     Ok(())
-}
-
-enum Score {
-    Win,
-    Loss,
-    Draw,
 }
 
 async fn update_user_score(

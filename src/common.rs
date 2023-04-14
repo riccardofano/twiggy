@@ -44,3 +44,9 @@ pub async fn member<'a>(ctx: &'a Context<'_>) -> Option<Cow<'a, Member>> {
 pub async fn colour(ctx: &Context<'_>) -> Option<Colour> {
     return member(ctx).await?.colour(ctx);
 }
+
+pub enum Score {
+    Win,
+    Loss,
+    Draw,
+}

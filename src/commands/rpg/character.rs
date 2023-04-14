@@ -28,16 +28,13 @@ const DEFAULT_STATS: [(Stat, u8); 6] = [
 pub struct Character {
     pub hp: isize,
     pub max_hp: isize,
+    pub name: String,
     stats: HashMap<Stat, usize>,
 
     class: &'static Class,
     specie: &'static Specie,
     alignment: String,
     move_choices: Vec<Stat>,
-
-    seed: Option<String>,
-    user_id: u64,
-    pub name: String,
 }
 
 impl Character {
@@ -82,19 +79,18 @@ impl Character {
             *stats.get_mut(stat).expect("Expected to have all the stats") += 1;
         }
 
-        let hp = pick_best_x_dice_rolls(HIT_DICE_SIDES, HIT_DICE_POOL, HIT_DICE, *seed) as isize;
+        let max_hp =
+            pick_best_x_dice_rolls(HIT_DICE_SIDES, HIT_DICE_POOL, HIT_DICE, *seed) as isize;
 
         Self {
-            hp,
-            max_hp: hp,
+            hp: max_hp,
+            max_hp,
+            name: name.to_string(),
             stats,
             move_choices,
             class,
             specie,
             alignment,
-            seed: seed.map(|s| s.to_string()),
-            user_id,
-            name: name.to_string(),
         }
     }
 

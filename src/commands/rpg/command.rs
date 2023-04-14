@@ -1,17 +1,21 @@
 use super::character::Character;
 
 use crate::commands::rpg::fight::{FightResult, RPGFight};
-use crate::common::{ephemeral_interaction_response, ephemeral_message, nickname};
+use crate::common::{ephemeral_interaction_response, ephemeral_message, nickname, Score};
 use crate::{Context, Data};
 
 use anyhow::Result;
+use chrono::{NaiveDateTime, Utc};
 use poise::futures_util::StreamExt;
 use poise::serenity_prelude as serenity;
 use poise::serenity_prelude::{ButtonStyle, ComponentInteractionCollectorBuilder, CreateActionRow};
+use sqlx::{Connection, QueryBuilder, SqliteConnection};
 use std::time::Duration;
 use tokio::sync::RwLock;
 
 const DEAD_DUEL_COOLDOWN: Duration = Duration::from_secs(5 * 60);
+const LOSS_COOLDOWN: Duration = Duration::from_secs(30);
+const RANK_CHANGE_FACTOR: f64 = 56.;
 
 #[poise::command(slash_command, guild_only, subcommands("challenge"))]
 pub async fn rpg(_ctx: Context<'_>) -> Result<()> {
@@ -33,16 +37,45 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         .command()
         .custom_data
         .downcast_ref::<RwLock<ChallengeData>>()
-        .expect("Expected to have passed a DuelData struct as custom_data");
+        .expect("Expected to have passed a ChallengeData struct as custom_data");
 
     if custom_data_lock.read().await.in_progress {
-        ephemeral_message(ctx, "A RPG duel is already in progress").await?;
+        ephemeral_message(ctx, "A RPG fight is already in progress").await?;
         return Ok(());
     }
 
     let challenger = ctx.author();
     let challenger_nick = nickname(challenger, &ctx).await;
     let challenger_name = challenger_nick.as_deref().unwrap_or(&challenger.name);
+
+    let mut conn = ctx.data().database.acquire().await?;
+    let challenger_stats = match get_character_stats(&mut conn, challenger.id.to_string()).await {
+        Ok(last_loss) => last_loss,
+        Err(e) => {
+            eprintln!(
+                "Could not retrieve last loss of {} - {:?}",
+                challenger.name, e
+            );
+            ephemeral_message(ctx, "Something went wrong when trying to join the fight.").await?;
+            return Ok(());
+        }
+    };
+    drop(conn);
+
+    let now = Utc::now().naive_utc();
+    let loss_cooldown_duration = chrono::Duration::from_std(LOSS_COOLDOWN)?;
+    if challenger_stats.last_loss + loss_cooldown_duration > now {
+        let time_until_duel = (challenger_stats.last_loss + loss_cooldown_duration).timestamp();
+        ephemeral_message(
+            ctx,
+            format!(
+                "{} you have recently lost a fight. Please try again <t:{}:R>.",
+                challenger_name, time_until_duel
+            ),
+        )
+        .await?;
+        return Ok(());
+    }
 
     let challenger_character = Character::new(
         challenger.id.0,
@@ -52,16 +85,16 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
 
     let mut row = CreateActionRow::default();
     row.create_button(|f| {
-        f.custom_id("duel-btn")
+        f.custom_id("rpg-btn")
             .emoji('⚔')
-            .label("Accept Duel".to_string())
+            .label("Accept Fight".to_string())
             .style(ButtonStyle::Primary)
     });
 
     let accept_reply = ctx
         .send(|r| {
             r.content(format!(
-                "{challenger_name} is throwing down the gauntlet in challenge.."
+                "{challenger_name} is throwing down the gauntlet in challenge..."
             ))
             .components(|c| c.add_action_row(row))
         })
@@ -79,11 +112,12 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         .timeout(DEAD_DUEL_COOLDOWN)
         .await
     {
-        if interaction.data.custom_id != "duel-btn" {
+        if interaction.data.custom_id != "rpg-btn" {
             continue;
         }
+
         if interaction.user.id == challenger.id {
-            ephemeral_interaction_response(&ctx, interaction, "You cannot join your own duel.")
+            ephemeral_interaction_response(&ctx, interaction, "You cannot join your own fight.")
                 .await?;
             continue;
         }
@@ -101,17 +135,61 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         let accepter = &interaction.user;
         let accepter_nick = nickname(accepter, &ctx).await;
         let accepter_name = accepter_nick.as_deref().unwrap_or(&challenger.name);
+
+        let mut conn = ctx.data().database.acquire().await?;
+        let accepter_stats = get_character_stats(&mut conn, accepter.id.to_string()).await?;
+        drop(conn);
+
+        let now = Utc::now().naive_utc();
+        if accepter_stats.last_loss + loss_cooldown_duration > now {
+            let time_until_duel = (accepter_stats.last_loss + loss_cooldown_duration).timestamp();
+            let content = format!(
+                "{} you have recently lost a fight. Please try again <t:{}:R>.",
+                accepter_name, time_until_duel
+            );
+            ephemeral_interaction_response(&ctx, interaction, content).await?;
+            continue;
+        }
+
         let accepter_character =
             Character::new(accepter.id.0, accepter_name, &accepter_nick.as_deref());
 
         let mut fight = RPGFight::new(challenger_character, accepter_character);
+        let fight_result = fight.fight();
 
-        // TODO: update db with fight results
-        match fight.fight() {
-            FightResult::ChallengerWin => {}
-            FightResult::AccepterWin => {}
-            FightResult::Draw => {}
-        };
+        let mut cmd_data = custom_data_lock.write().await;
+        cmd_data.in_progress = false;
+
+        let mut conn = ctx.data().database.acquire().await?;
+        let mut transaction = conn.begin().await?;
+
+        update_character_stats(
+            &mut transaction,
+            challenger.id.to_string(),
+            challenger_stats.elo_rank,
+            accepter_stats.elo_rank,
+            match fight_result {
+                FightResult::AccepterWin => Score::Loss,
+                FightResult::ChallengerWin => Score::Win,
+                FightResult::Draw => Score::Draw,
+            },
+        )
+        .await?;
+
+        update_character_stats(
+            &mut transaction,
+            accepter.id.to_string(),
+            accepter_stats.elo_rank,
+            challenger_stats.elo_rank,
+            match fight_result {
+                FightResult::AccepterWin => Score::Win,
+                FightResult::ChallengerWin => Score::Loss,
+                FightResult::Draw => Score::Draw,
+            },
+        )
+        .await?;
+
+        transaction.commit().await?;
 
         let mut summary_row = CreateActionRow::default();
         summary_row.create_button(|f| {
@@ -136,9 +214,6 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
             })
             .await?;
 
-        let mut cmd_data = custom_data_lock.write().await;
-        cmd_data.in_progress = false;
-
         ctx.data()
             .rpg_summary_cache
             .lock()
@@ -150,8 +225,10 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
 
     accept_reply
         .edit(ctx, |r| {
-            r.content(format!("{challenger_name} failed to find someone to duel."))
-                .components(|c| c)
+            r.content(format!(
+                "{challenger_name} failed to find someone to fight."
+            ))
+            .components(|c| c)
         })
         .await?;
 
@@ -185,6 +262,75 @@ pub async fn setup_rpg_summary(ctx: &serenity::Context, user_data: &Data) -> Res
         })
         .collect()
         .await;
+
+    Ok(())
+}
+
+struct CharacterPastStats {
+    last_loss: NaiveDateTime,
+    elo_rank: i64,
+}
+
+fn calculate_new_elo(player_rank: i64, opponent_rank: i64, outcome: &Score) -> i64 {
+    let base: f64 = 10.;
+    let exponent = 1. / 400.;
+    let expected = 1. / (1. + base.powf(exponent * (opponent_rank - player_rank) as f64));
+
+    let score = match outcome {
+        Score::Win => 1.,
+        Score::Loss => 0.,
+        Score::Draw => 0.5,
+    };
+
+    player_rank + (RANK_CHANGE_FACTOR * (score - expected)).round() as i64
+}
+
+async fn get_character_stats(
+    conn: &mut SqliteConnection,
+    user_id: String,
+) -> Result<CharacterPastStats> {
+    let row = sqlx::query_as!(
+        CharacterPastStats,
+        r#"
+        INSERT OR IGNORE INTO RPGCharacter (user_id) VALUES (?);
+        SELECT last_loss, elo_rank From RPGCharacter WHERE user_id = ?
+        "#,
+        user_id,
+        user_id
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+
+    Ok(row)
+}
+
+async fn update_character_stats(
+    conn: &mut SqliteConnection,
+    user_id: String,
+    elo_rank: i64,
+    opponent_elo_rank: i64,
+    outcome: Score,
+) -> Result<()> {
+    let new_elo = calculate_new_elo(elo_rank, opponent_elo_rank, &outcome);
+
+    let update_query = match outcome {
+        Score::Win => "wins = wins + 1",
+        Score::Loss => "last_loss = datetime('now'), losses = losses + 1",
+        Score::Draw => "draws = draws + 1",
+    };
+
+    let mut query = QueryBuilder::new("UPDATE RPGCharacter SET elo_rank = ");
+    query.push_bind(new_elo);
+    query.push(", peak_elo = MAX(peak_elo, ");
+    query.push_bind(new_elo);
+    query.push("), floor_elo = MIN(floor_elo, ");
+    query.push_bind(new_elo);
+    query.push("), ");
+    query.push(update_query);
+    query.push(" WHERE user_id = ");
+    query.push_bind(&user_id);
+
+    query.build().execute(&mut *conn).await?;
 
     Ok(())
 }
