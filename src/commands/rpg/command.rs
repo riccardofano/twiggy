@@ -125,6 +125,11 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
                 .style(ButtonStyle::Secondary)
         });
 
+        // NOTE: To edit the original message after a button has been pressed,
+        // you first need to create an interaction response, this is allows us
+        // to avoid getting the `This interaction failed` message, and then
+        // using the Kind:UpdateMessage update the original message with the new
+        // content/components otherwise you'd just end up sending a new message.
         interaction
             .create_interaction_response(ctx, |r| {
                 r.kind(serenity::InteractionResponseType::UpdateMessage)
