@@ -215,8 +215,8 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
                 .style(ButtonStyle::Secondary)
         });
         let elo_change_summary = format!(
-            "**{challenger_name}** {} [{new_challenger_elo}]. \
-            **{accepter_name}** {} [{new_accepter_elo}].",
+            "**{challenger_name}**{} [{new_challenger_elo}]. \
+            **{accepter_name}**{} [{new_accepter_elo}].",
             calculate_lp_difference(challenger_stats.elo_rank, new_challenger_elo),
             calculate_lp_difference(accepter_stats.elo_rank, new_accepter_elo)
         );
@@ -385,12 +385,64 @@ async fn retrieve_fight_record(db: &SqlitePool, message_id: String) -> Result<Op
     Ok(row.map(|r| r.log))
 }
 
+struct LadderRank {
+    upper_bound: i64,
+    icon: &'static str,
+    _name: &'static str,
+}
+
+const RANKS: &[LadderRank] = &[
+    LadderRank {
+        upper_bound: 700,
+        icon: "🪵",
+        _name: "Wood",
+    },
+    LadderRank {
+        upper_bound: 800,
+        icon: "🥉",
+        _name: "Bronze",
+    },
+    LadderRank {
+        upper_bound: 900,
+        icon: "🥈",
+        _name: "Silver",
+    },
+    LadderRank {
+        upper_bound: 1100,
+        icon: "🥇",
+        _name: "Gold",
+    },
+    LadderRank {
+        upper_bound: 1200,
+        icon: "💎",
+        _name: "Diamond",
+    },
+    LadderRank {
+        upper_bound: 1300,
+        icon: "🎀",
+        _name: "Master",
+    },
+    LadderRank {
+        upper_bound: i64::MAX,
+        icon: "🏆",
+        _name: "Grand Master",
+    },
+];
+
 fn calculate_lp_difference(old_elo: i64, new_elo: i64) -> String {
     let elo_difference = new_elo - old_elo;
 
+    let mut i = 0;
+    let icon = loop {
+        if RANKS[i].upper_bound > new_elo {
+            break RANKS[i].icon;
+        }
+        i += 1;
+    };
+
     if elo_difference > 0 {
-        format!("gained {}LP", elo_difference)
+        format!("{icon} gained {}LP", elo_difference)
     } else {
-        format!("lost {}LP", -elo_difference)
+        format!("{icon} lost {}LP", -elo_difference)
     }
 }
