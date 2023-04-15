@@ -165,7 +165,7 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         let mut conn = ctx.data().database.acquire().await?;
         let mut transaction = conn.begin().await?;
 
-        update_character_stats(
+        let new_challenger_elo = update_character_stats(
             &mut transaction,
             challenger.id.to_string(),
             challenger_stats.elo_rank,
@@ -178,7 +178,7 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         )
         .await?;
 
-        update_character_stats(
+        let new_accepter_elo = update_character_stats(
             &mut transaction,
             accepter.id.to_string(),
             accepter_stats.elo_rank,
@@ -214,6 +214,12 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
                 .label("See summary".to_string())
                 .style(ButtonStyle::Secondary)
         });
+        let elo_change_summary = format!(
+            "**{challenger_name}** {} [{new_challenger_elo}]. \
+            **{accepter_name}** {} [{new_accepter_elo}].",
+            calculate_lp_difference(challenger_stats.elo_rank, new_challenger_elo),
+            calculate_lp_difference(accepter_stats.elo_rank, new_accepter_elo)
+        );
 
         // NOTE: To edit the original message after a button has been pressed,
         // you first need to create an interaction response, this is allows us
@@ -224,7 +230,7 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
             .create_interaction_response(ctx, |r| {
                 r.kind(serenity::InteractionResponseType::UpdateMessage)
                     .interaction_response_data(|d| {
-                        d.content(fight.summary())
+                        d.content(format!("{}\n{}", fight.summary(), elo_change_summary))
                             .components(|c| c.set_action_row(summary_row))
                     })
             })
@@ -330,7 +336,7 @@ async fn update_character_stats(
     elo_rank: i64,
     opponent_elo_rank: i64,
     outcome: Score,
-) -> Result<()> {
+) -> Result<i64> {
     let new_elo = calculate_new_elo(elo_rank, opponent_elo_rank, &outcome);
 
     let update_query = match outcome {
@@ -352,7 +358,7 @@ async fn update_character_stats(
 
     query.build().execute(&mut *conn).await?;
 
-    Ok(())
+    Ok(new_elo)
 }
 
 async fn new_fight_record(
@@ -377,4 +383,14 @@ async fn retrieve_fight_record(db: &SqlitePool, message_id: String) -> Result<Op
         .await?;
 
     Ok(row.map(|r| r.log))
+}
+
+fn calculate_lp_difference(old_elo: i64, new_elo: i64) -> String {
+    let elo_difference = new_elo - old_elo;
+
+    if elo_difference > 0 {
+        format!("gained {}LP", elo_difference)
+    } else {
+        format!("lost {}LP", -elo_difference)
+    }
 }
