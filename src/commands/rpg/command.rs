@@ -9,7 +9,7 @@ use chrono::{NaiveDateTime, Utc};
 use poise::futures_util::StreamExt;
 use poise::serenity_prelude as serenity;
 use poise::serenity_prelude::{ButtonStyle, ComponentInteractionCollectorBuilder, CreateActionRow};
-use sqlx::{Connection, QueryBuilder, SqliteConnection};
+use sqlx::{Connection, QueryBuilder, SqliteConnection, SqlitePool};
 use std::time::Duration;
 use tokio::sync::RwLock;
 
@@ -157,8 +157,10 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         let mut fight = RPGFight::new(challenger_character, accepter_character);
         let fight_result = fight.fight();
 
-        let mut cmd_data = custom_data_lock.write().await;
-        cmd_data.in_progress = false;
+        {
+            let mut cmd_data = custom_data_lock.write().await;
+            cmd_data.in_progress = false;
+        }
 
         let mut conn = ctx.data().database.acquire().await?;
         let mut transaction = conn.begin().await?;
@@ -189,7 +191,21 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         )
         .await?;
 
+        let fight_log = fight.to_string();
+        new_fight_record(
+            &mut transaction,
+            interaction.message.id.to_string(),
+            &fight_log,
+        )
+        .await?;
+
         transaction.commit().await?;
+
+        ctx.data()
+            .rpg_summary_cache
+            .lock()
+            .await
+            .insert(reply_msg.id.0, fight_log);
 
         let mut summary_row = CreateActionRow::default();
         summary_row.create_button(|f| {
@@ -213,12 +229,6 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
                     })
             })
             .await?;
-
-        ctx.data()
-            .rpg_summary_cache
-            .lock()
-            .await
-            .insert(reply_msg.id.0, fight.to_string());
 
         return Ok(());
     }
@@ -246,11 +256,21 @@ pub async fn setup_rpg_summary(ctx: &serenity::Context, user_data: &Data) -> Res
     let _: Vec<_> = collector
         .then(|interaction| async move {
             let data = user_data.rpg_summary_cache.lock().await;
-            let summary = data.get(&interaction.message.id.0);
+            let hashmap_log = data.get(&interaction.message.id.0);
 
-            let response = match summary {
-                Some(r) => r,
-                None => "Could not find the summary for that fight.",
+            let response = match hashmap_log {
+                Some(log) => log.clone(),
+                None => match retrieve_fight_record(
+                    &user_data.database,
+                    interaction.message.id.to_string(),
+                )
+                .await
+                .ok()
+                .flatten()
+                {
+                    Some(log) => log,
+                    None => "This fight was lost to history or maybe it never happened".to_string(),
+                },
             };
 
             let _result = interaction
@@ -333,4 +353,28 @@ async fn update_character_stats(
     query.build().execute(&mut *conn).await?;
 
     Ok(())
+}
+
+async fn new_fight_record(
+    conn: &mut SqliteConnection,
+    message_id: String,
+    log: &str,
+) -> Result<()> {
+    sqlx::query!(
+        r#"INSERT INTO RPGFight (message_id, log) VALUES (?, ?)"#,
+        message_id,
+        log
+    )
+    .execute(&mut *conn)
+    .await?;
+
+    Ok(())
+}
+
+async fn retrieve_fight_record(db: &SqlitePool, message_id: String) -> Result<Option<String>> {
+    let row = sqlx::query!("SELECT log FROM RPGFight WHERE message_id = ?", message_id)
+        .fetch_optional(db)
+        .await?;
+
+    Ok(row.map(|r| r.log))
 }
