@@ -272,7 +272,7 @@ async fn preview(
 
     let silent = silent.unwrap_or(true);
     let character = Character::new(ctx.author().id.0, &name, &Some(&name));
-    ctx.send(|r| r.content(character.to_string()).ephemeral(silent))
+    ctx.send(|r| r.embed(|e| character.to_embed(e)).ephemeral(silent))
         .await?;
 
     Ok(())
@@ -295,7 +295,7 @@ async fn character(
     let name = nick.as_deref().unwrap_or(&person.name);
     let character = Character::new(person.id.0, name, &nick.as_deref());
 
-    ctx.send(|r| r.content(character.to_string()).ephemeral(silent))
+    ctx.send(|r| r.embed(|e| character.to_embed(e)).ephemeral(silent))
         .await?;
 
     Ok(())

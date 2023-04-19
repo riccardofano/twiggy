@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 
+use poise::serenity_prelude::CreateEmbed;
 use rand::SeedableRng;
 use rand::{rngs::StdRng, seq::SliceRandom};
 use rand_seeder::Seeder;
@@ -105,33 +106,53 @@ impl Character {
     pub fn get_modifier(&self, stat: &Stat) -> usize {
         self.stats[stat] / 2 - 5
     }
-}
 
-impl Display for Character {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            r#"{name}
-{divider}
-{specie} {class}
-Alignment: {alignment}
-HP: {hp}
-STR | DEX | CON | INT | WIS | CHR
-{str: >3} | {dex: >3} | {con: >3} | {int: >3} | {wis: >3} | {chr: >3}
-"#,
-            // `{something: >3}` means pad the variable `something` with spaces so the word is always 3 wide
-            name = self.name,
-            divider = "-".repeat(self.name.len()),
+    pub fn to_embed<'a, 'b>(&'a self, builder: &'b mut CreateEmbed) -> &'b mut CreateEmbed {
+        builder
+            .color(0x0099333)
+            .title(&self.name)
+            .description(format!(
+                "{info}\n```{stats}```",
+                info = self.display_info(),
+                stats = self.display_stats()
+            ));
+        builder
+    }
+
+    fn display_info(&self) -> String {
+        format!(
+            "{specie} {class}\nAlignment: {alignment}\nHP: {hp}",
             specie = self.specie.name,
             class = self.class.name,
             alignment = self.alignment,
             hp = self.max_hp,
+        )
+    }
+
+    fn display_stats(&self) -> String {
+        format!(
+            r#"STR | DEX | CON | INT | WIS | CHR
+{str: >3} | {dex: >3} | {con: >3} | {int: >3} | {wis: >3} | {chr: >3}"#,
+            // `{something: >3}` means pad the variable `something` with spaces so the word is always 3 wide
             str = self.stats[&Stat::STR],
             dex = self.stats[&Stat::DEX],
             con = self.stats[&Stat::CON],
             int = self.stats[&Stat::INT],
             wis = self.stats[&Stat::WIS],
             chr = self.stats[&Stat::CHR],
+        )
+    }
+}
+
+impl Display for Character {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{name}\n{divider}\n{info}\n{stats}",
+            name = self.name,
+            divider = "-".repeat(self.name.len()),
+            info = self.display_info(),
+            stats = self.display_stats()
         )
     }
 }
