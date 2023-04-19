@@ -17,7 +17,7 @@ use tokio::sync::RwLock;
 const DEAD_DUEL_COOLDOWN: Duration = Duration::from_secs(5 * 60);
 const LOSS_COOLDOWN: Duration = Duration::from_secs(30);
 
-#[poise::command(slash_command, guild_only, subcommands("challenge"))]
+#[poise::command(slash_command, guild_only, subcommands("challenge", "preview"))]
 pub async fn rpg(_ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
@@ -250,6 +250,22 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
 
     let mut data = custom_data_lock.write().await;
     data.in_progress = false;
+
+    Ok(())
+}
+
+/// Preview what your character would look like with a new nickname
+#[poise::command(slash_command, guild_only, prefix_command)]
+async fn preview(ctx: Context<'_>, name: String, silent: Option<bool>) -> Result<()> {
+    if name.len() >= 256 {
+        ephemeral_message(ctx, "Name have fewer than 256 characters.").await?;
+        return Ok(());
+    }
+
+    let silent = silent.unwrap_or(true);
+    let character = Character::new(ctx.author().id.0, &name, &Some(&name));
+    ctx.send(|r| r.content(character.to_string()).ephemeral(silent))
+        .await?;
 
     Ok(())
 }
