@@ -1,21 +1,21 @@
 use super::character::Character;
+use super::util::calculate_new_elo;
 
 use crate::commands::rpg::fight::{FightResult, RPGFight};
+use crate::commands::rpg::util::calculate_lp_difference;
 use crate::common::{ephemeral_interaction_response, ephemeral_message, nickname, Score};
-use crate::{Context, Data};
+use crate::Context;
 
 use anyhow::Result;
 use chrono::{NaiveDateTime, Utc};
-use poise::futures_util::StreamExt;
 use poise::serenity_prelude as serenity;
-use poise::serenity_prelude::{ButtonStyle, ComponentInteractionCollectorBuilder, CreateActionRow};
-use sqlx::{Connection, QueryBuilder, SqliteConnection, SqlitePool};
+use poise::serenity_prelude::{ButtonStyle, CreateActionRow};
+use sqlx::{Connection, QueryBuilder, SqliteConnection};
 use std::time::Duration;
 use tokio::sync::RwLock;
 
 const DEAD_DUEL_COOLDOWN: Duration = Duration::from_secs(5 * 60);
 const LOSS_COOLDOWN: Duration = Duration::from_secs(30);
-const RANK_CHANGE_FACTOR: f64 = 56.;
 
 #[poise::command(slash_command, guild_only, subcommands("challenge"))]
 pub async fn rpg(_ctx: Context<'_>) -> Result<()> {
@@ -254,61 +254,9 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
-pub async fn setup_rpg_summary(ctx: &serenity::Context, user_data: &Data) -> Result<()> {
-    let collector = ComponentInteractionCollectorBuilder::new(ctx)
-        .filter(|f| f.data.custom_id == "rpg-summary")
-        .build();
-
-    let _: Vec<_> = collector
-        .then(|interaction| async move {
-            let data = user_data.rpg_summary_cache.lock().await;
-            let hashmap_log = data.get(&interaction.message.id.0);
-
-            let response = match hashmap_log {
-                Some(log) => log.clone(),
-                None => match retrieve_fight_record(
-                    &user_data.database,
-                    interaction.message.id.to_string(),
-                )
-                .await
-                .ok()
-                .flatten()
-                {
-                    Some(log) => log,
-                    None => "This fight was lost to history or maybe it never happened".to_string(),
-                },
-            };
-
-            let _result = interaction
-                .create_interaction_response(&ctx, |r| {
-                    r.interaction_response_data(|d| d.content(response).ephemeral(true))
-                })
-                .await;
-            interaction
-        })
-        .collect()
-        .await;
-
-    Ok(())
-}
-
 struct CharacterPastStats {
     last_loss: NaiveDateTime,
     elo_rank: i64,
-}
-
-fn calculate_new_elo(player_rank: i64, opponent_rank: i64, outcome: &Score) -> i64 {
-    let base: f64 = 10.;
-    let exponent = 1. / 400.;
-    let expected = 1. / (1. + base.powf(exponent * (opponent_rank - player_rank) as f64));
-
-    let score = match outcome {
-        Score::Win => 1.,
-        Score::Loss => 0.,
-        Score::Draw => 0.5,
-    };
-
-    player_rank + (RANK_CHANGE_FACTOR * (score - expected)).round() as i64
 }
 
 async fn get_character_stats(
@@ -375,74 +323,4 @@ async fn new_fight_record(
     .await?;
 
     Ok(())
-}
-
-async fn retrieve_fight_record(db: &SqlitePool, message_id: String) -> Result<Option<String>> {
-    let row = sqlx::query!("SELECT log FROM RPGFight WHERE message_id = ?", message_id)
-        .fetch_optional(db)
-        .await?;
-
-    Ok(row.map(|r| r.log))
-}
-
-struct LadderRank {
-    upper_bound: i64,
-    icon: &'static str,
-    _name: &'static str,
-}
-
-const RANKS: &[LadderRank] = &[
-    LadderRank {
-        upper_bound: 700,
-        icon: "🪵",
-        _name: "Wood",
-    },
-    LadderRank {
-        upper_bound: 800,
-        icon: "🥉",
-        _name: "Bronze",
-    },
-    LadderRank {
-        upper_bound: 900,
-        icon: "🥈",
-        _name: "Silver",
-    },
-    LadderRank {
-        upper_bound: 1100,
-        icon: "🥇",
-        _name: "Gold",
-    },
-    LadderRank {
-        upper_bound: 1200,
-        icon: "💎",
-        _name: "Diamond",
-    },
-    LadderRank {
-        upper_bound: 1300,
-        icon: "🎀",
-        _name: "Master",
-    },
-    LadderRank {
-        upper_bound: i64::MAX,
-        icon: "🏆",
-        _name: "Grand Master",
-    },
-];
-
-fn calculate_lp_difference(old_elo: i64, new_elo: i64) -> String {
-    let elo_difference = new_elo - old_elo;
-
-    let mut i = 0;
-    let icon = loop {
-        if RANKS[i].upper_bound > new_elo {
-            break RANKS[i].icon;
-        }
-        i += 1;
-    };
-
-    if elo_difference > 0 {
-        format!("{icon} gained {}LP", elo_difference)
-    } else {
-        format!("{icon} lost {}LP", -elo_difference)
-    }
 }
