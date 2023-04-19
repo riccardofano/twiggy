@@ -8,7 +8,7 @@ use crate::Context;
 
 use anyhow::Result;
 use chrono::{NaiveDateTime, Utc};
-use poise::serenity_prelude as serenity;
+use poise::serenity_prelude::{self as serenity, User};
 use poise::serenity_prelude::{ButtonStyle, CreateActionRow};
 use sqlx::{Connection, QueryBuilder, SqliteConnection};
 use std::time::Duration;
@@ -256,7 +256,11 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
 
 /// Preview what your character would look like with a new nickname
 #[poise::command(slash_command, guild_only, prefix_command)]
-async fn preview(ctx: Context<'_>, name: String, silent: Option<bool>) -> Result<()> {
+async fn preview(
+    ctx: Context<'_>,
+    #[description = "Your new nickname"] name: String,
+    #[description = "Whether the message will be shown to everyone or not"] silent: Option<bool>,
+) -> Result<()> {
     if name.len() >= 256 {
         ephemeral_message(ctx, "Name have fewer than 256 characters.").await?;
         return Ok(());
