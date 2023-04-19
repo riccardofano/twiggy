@@ -17,7 +17,11 @@ use tokio::sync::RwLock;
 const DEAD_DUEL_COOLDOWN: Duration = Duration::from_secs(5 * 60);
 const LOSS_COOLDOWN: Duration = Duration::from_secs(30);
 
-#[poise::command(slash_command, guild_only, subcommands("challenge", "preview"))]
+#[poise::command(
+    slash_command,
+    guild_only,
+    subcommands("challenge", "preview", "character")
+)]
 pub async fn rpg(_ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
@@ -268,6 +272,29 @@ async fn preview(
 
     let silent = silent.unwrap_or(true);
     let character = Character::new(ctx.author().id.0, &name, &Some(&name));
+    ctx.send(|r| r.content(character.to_string()).ephemeral(silent))
+        .await?;
+
+    Ok(())
+}
+
+/// Show your own or someone else's character stats
+#[poise::command(slash_command, guild_only, prefix_command)]
+async fn character(
+    ctx: Context<'_>,
+    #[description = "The person whose character you want to see"] user: Option<User>,
+    #[description = "Whether the message will be shown to everyone or not"] silent: Option<bool>,
+) -> Result<()> {
+    let silent = silent.unwrap_or(true);
+    let person = match user {
+        Some(user) => user,
+        None => ctx.author().to_owned(),
+    };
+
+    let nick = nickname(&person, &ctx).await;
+    let name = nick.as_deref().unwrap_or(&person.name);
+    let character = Character::new(person.id.0, name, &nick.as_deref());
+
     ctx.send(|r| r.content(character.to_string()).ephemeral(silent))
         .await?;
 
