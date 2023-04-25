@@ -1,5 +1,10 @@
-use std::{env::temp_dir, fs, path::PathBuf};
+use std::{
+    env::temp_dir,
+    fs,
+    path::{Path, PathBuf},
+};
 
+use chrono::Utc;
 use image::{imageops::overlay, io::Reader};
 use poise::serenity_prelude::AttachmentType;
 use rand::{seq::SliceRandom, thread_rng};
@@ -81,26 +86,34 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
             "I tried really hard but i wasn't able to make a unique dino for you. Sorry... :'(",
         )
         .await?;
+        return Ok(());
     }
 
     let parts = parts.unwrap();
     let image_path = generate_dino_image(&parts)?;
     let image_file_name = image_path.file_name().unwrap().to_str().unwrap();
 
-    let name = name(ctx.author(), &ctx).await;
-    if let Err(e) = ctx
-        .send(|m| {
-            m.attachment(AttachmentType::Path(&image_path)).embed(|e| {
-                e.colour(0x66ff99)
-                    .author(|a| a.name(name))
-                    .title(parts.name)
+    let author_name = name(ctx.author(), &ctx).await;
+    let now = Utc::now().timestamp();
+    ctx.send(|message| {
+        message
+            .attachment(AttachmentType::Path(&image_path))
+            .embed(|embed| {
+                embed
+                    .colour(0x66ff99)
+                    .author(|author| author.name(author_name))
+                    .title(&parts.name)
+                    .description(format!("**Created:** <t:{now}>"))
+                    .footer(|f| {
+                        f.text(format!(
+                            "{} is worth 0 Dino Bucks!\nHotness Rating: 0.00",
+                            &parts.name
+                        ))
+                    })
                     .attachment(image_file_name)
             })
-        })
-        .await
-    {
-        eprintln!("{:?}", e)
-    };
+    })
+    .await?;
 
     Ok(())
 }
@@ -141,19 +154,38 @@ fn choose_parts(fragments: &Fragments) -> DinoParts {
         .expect("Expected to have at least one set of eyes")
         .to_path_buf();
 
-    let name = format!(
-        "{}_{}_{}",
-        body.file_stem().unwrap().to_str().unwrap(),
-        mouth.file_stem().unwrap().to_str().unwrap(),
-        eyes.file_stem().unwrap().to_str().unwrap()
-    );
-
-    DinoParts {
+    let mut parts = DinoParts {
         body,
         mouth,
         eyes,
-        name,
-    }
+        name: String::new(),
+    };
+
+    parts.name = generate_dino_name(&parts);
+    parts
+}
+
+fn get_file_stem(path: &Path) -> &str {
+    path.file_stem().unwrap().to_str().unwrap()
+}
+
+fn generate_dino_name(parts: &DinoParts) -> String {
+    let body = get_file_stem(&parts.body).replace("_b", "");
+    let mouth = get_file_stem(&parts.mouth).replace("_m", "");
+    let eyes = get_file_stem(&parts.eyes).replace("_e", "");
+
+    let body_end = 3.min(body.len());
+    let mouth_start = 3.min(mouth.len() - 3);
+    let eyes_start = 6.min(eyes.len() - 3);
+
+    // TODO: add random characters at the end like in the original
+
+    format!(
+        "{}{}{}",
+        &body[..body_end],
+        &mouth[mouth_start..],
+        &eyes[eyes_start..]
+    )
 }
 
 fn generate_dino_image(parts: &DinoParts) -> Result<PathBuf> {
