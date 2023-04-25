@@ -1,6 +1,7 @@
 use super::character::Character;
 use super::data::{Stat, VictoryKind};
-use super::util::pick_best_x_dice_rolls;
+
+use crate::common::pick_best_x_dice_rolls;
 
 use rand::seq::SliceRandom;
 use std::cmp;

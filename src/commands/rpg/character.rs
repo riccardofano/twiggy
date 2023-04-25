@@ -7,9 +7,9 @@ use rand::{rngs::StdRng, seq::SliceRandom};
 use rand_seeder::Seeder;
 
 use crate::commands::rpg::data::{CLASSES, STANDARD_SPECIES};
+use crate::common::pick_best_x_dice_rolls;
 
 use super::data::{Class, Specie, Stat, ADJECTIVES, BANANA_SPECIE, NOUNS};
-use super::util::pick_best_x_dice_rolls;
 
 const BANANA_ID: u64 = 1234567;
 
