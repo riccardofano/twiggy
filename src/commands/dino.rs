@@ -1,11 +1,12 @@
 use std::{
     env::temp_dir,
     fs,
+    io::Cursor,
     path::{Path, PathBuf},
 };
 
 use chrono::Utc;
-use image::{imageops::overlay, io::Reader};
+use image::{imageops::overlay, io::Reader, ImageOutputFormat};
 use poise::serenity_prelude::AttachmentType;
 use rand::{seq::SliceRandom, thread_rng};
 use tokio::sync::{RwLock, RwLockReadGuard};
@@ -90,14 +91,17 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     }
 
     let parts = parts.unwrap();
-    let image_path = generate_dino_image(&parts)?;
+    let (bytes, image_path) = generate_dino_image(&parts)?;
     let image_file_name = image_path.file_name().unwrap().to_str().unwrap();
 
     let author_name = name(ctx.author(), &ctx).await;
     let now = Utc::now().timestamp();
     ctx.send(|message| {
         message
-            .attachment(AttachmentType::Path(&image_path))
+            .attachment(AttachmentType::Bytes {
+                data: bytes.into(),
+                filename: image_file_name.to_string(),
+            })
             .embed(|embed| {
                 embed
                     .colour(0x66ff99)
@@ -188,7 +192,7 @@ fn generate_dino_name(parts: &DinoParts) -> String {
     )
 }
 
-fn generate_dino_image(parts: &DinoParts) -> Result<PathBuf> {
+fn generate_dino_image(parts: &DinoParts) -> Result<(Vec<u8>, PathBuf)> {
     let mut body = Reader::open(&parts.body)
         .expect("Could not open file")
         .decode()
@@ -200,8 +204,9 @@ fn generate_dino_image(parts: &DinoParts) -> Result<PathBuf> {
     overlay(&mut body, &eyes, 0, 0);
 
     let path = temp_dir().join(&parts.name).with_extension("png");
-    dbg!(&path);
-    body.save(&path)?;
 
-    Ok(path)
+    let mut bytes: Vec<u8> = Vec::new();
+    body.write_to(&mut Cursor::new(&mut bytes), ImageOutputFormat::Png)?;
+
+    Ok((bytes, path))
 }
