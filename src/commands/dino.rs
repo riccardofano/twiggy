@@ -35,6 +35,8 @@ struct DinoParts {
 
 const FRAGMENT_PATH: &str = "./assets/dino/fragments";
 const MAX_GENERATION_ATTEMPTS: usize = 20;
+const MAX_FAILED_HATCHES: i64 = 3;
+const HATCH_FAILS_TEXT: &[&str; 3] = &["1st", "2nd", "3rd"];
 
 const HATCH_COOLDOWN: Duration = Duration::from_secs(10);
 
@@ -74,18 +76,36 @@ pub async fn dino(_ctx: Context<'_>) -> Result<()> {
 
 #[poise::command(slash_command, guild_only)]
 async fn hatch(ctx: Context<'_>) -> Result<()> {
-    let last_hatch = get_last_hatch(&ctx.data().database, ctx.author().id.to_string()).await?;
     let now = Utc::now().naive_utc();
     let hatch_cooldown_duration = chrono::Duration::from_std(HATCH_COOLDOWN)?;
 
-    if last_hatch + hatch_cooldown_duration > now {
+    let hatcher_record = get_user_record(&ctx.data().database, ctx.author().id.to_string()).await?;
+    if hatcher_record.last_hatch + hatch_cooldown_duration > now {
         // TODO: better message
         ephemeral_message(ctx, "Can't hatch yet").await?;
         return Ok(());
     }
 
-    let hatch_roll = pick_best_x_dice_rolls(4, 1, 1, None);
+    let hatch_roll = pick_best_x_dice_rolls(4, 1, 1, None) as i64;
     // TODO: give twitch subs a reroll
+
+    if hatch_roll <= (MAX_FAILED_HATCHES - hatcher_record.consecutive_fails) {
+        update_failed_hatches(&ctx.data().database, ctx.author().id.to_string()).await?;
+
+        let midnight_utc = (now + chrono::Duration::days(1))
+            .date()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+        ctx.say(format!(
+            "You failed to hatch the egg ({} attempt), \
+            better luck next time. You can try again <t:{}:R>",
+            HATCH_FAILS_TEXT[hatcher_record.consecutive_fails as usize],
+            midnight_utc.timestamp()
+        ))
+        .await?;
+
+        return Ok(());
+    }
 
     let custom_data_lock = ctx.parent_commands()[0]
         .custom_data
@@ -138,6 +158,17 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     .await?;
 
     transaction.commit().await?;
+
+    Ok(())
+}
+
+async fn update_failed_hatches(db: &SqlitePool, user_id: String) -> Result<()> {
+    sqlx::query!(
+        "UPDATE DinoUser SET consecutive_fails = consecutive_fails + 1 WHERE id = ?",
+        user_id
+    )
+    .execute(db)
+    .await?;
 
     Ok(())
 }
@@ -247,18 +278,23 @@ fn generate_dino_image(parts: &DinoParts) -> Result<(Vec<u8>, PathBuf)> {
     Ok((bytes, path))
 }
 
-async fn get_last_hatch(db: &SqlitePool, user_id: String) -> Result<NaiveDateTime> {
-    let row = sqlx::query!(
+struct UserRecord {
+    last_hatch: NaiveDateTime,
+    consecutive_fails: i64,
+}
+
+async fn get_user_record(db: &SqlitePool, user_id: String) -> Result<UserRecord> {
+    let row = sqlx::query_as!(
+        UserRecord,
         r#"INSERT OR IGNORE INTO DinoUser (id) VALUES (?);
-        SELECT last_hatch FROM DinoUser WHERE id = ?
-    "#,
+        SELECT last_hatch, consecutive_fails FROM DinoUser WHERE id = ?"#,
         user_id,
         user_id,
     )
     .fetch_one(db)
     .await?;
 
-    Ok(row.last_hatch)
+    Ok(row)
 }
 
 async fn insert_dino(

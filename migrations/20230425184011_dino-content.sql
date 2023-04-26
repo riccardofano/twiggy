@@ -17,7 +17,7 @@ CREATE TABLE DinoUser (
     last_gifting DATETIME NOT NULL DEFAULT 0,
     last_rename DATETIME NOT NULL DEFAULT 0,
     last_slurp DATETIME NOT NULL DEFAULT 0,
-    consecutive_fails NOT NULL DEFAULT 4
+    consecutive_fails INTEGER NOT NULL DEFAULT 4
 );
 
 CREATE TABLE DinoTransactionType (

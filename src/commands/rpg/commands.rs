@@ -314,7 +314,7 @@ async fn get_character_stats(
         CharacterPastStats,
         r#"
         INSERT OR IGNORE INTO RPGCharacter (user_id) VALUES (?);
-        SELECT last_loss, elo_rank From RPGCharacter WHERE user_id = ?
+        SELECT last_loss, elo_rank FROM RPGCharacter WHERE user_id = ?
         "#,
         user_id,
         user_id
