@@ -3,12 +3,14 @@ use std::{
     fs,
     io::Cursor,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
-use chrono::Utc;
+use chrono::{NaiveDateTime, Utc};
 use image::{imageops::overlay, io::Reader, ImageOutputFormat};
 use poise::serenity_prelude::AttachmentType;
 use rand::{seq::SliceRandom, thread_rng};
+use sqlx::{Acquire, SqliteConnection, SqlitePool};
 use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::{
@@ -33,6 +35,8 @@ struct DinoParts {
 
 const FRAGMENT_PATH: &str = "./assets/dino/fragments";
 const MAX_GENERATION_ATTEMPTS: usize = 20;
+
+const HATCH_COOLDOWN: Duration = Duration::from_secs(10);
 
 fn setup_dinos() -> RwLock<Fragments> {
     let fragments_dir = fs::read_dir(FRAGMENT_PATH).expect("Could not read fragment path");
@@ -70,16 +74,26 @@ pub async fn dino(_ctx: Context<'_>) -> Result<()> {
 
 #[poise::command(slash_command, guild_only)]
 async fn hatch(ctx: Context<'_>) -> Result<()> {
+    let last_hatch = get_last_hatch(&ctx.data().database, ctx.author().id.to_string()).await?;
+    let now = Utc::now().naive_utc();
+    let hatch_cooldown_duration = chrono::Duration::from_std(HATCH_COOLDOWN)?;
+
+    if last_hatch + hatch_cooldown_duration > now {
+        // TODO: better message
+        ephemeral_message(ctx, "Can't hatch yet").await?;
+        return Ok(());
+    }
+
     let hatch_roll = pick_best_x_dice_rolls(4, 1, 1, None);
     // TODO: give twitch subs a reroll
 
     let custom_data_lock = ctx.parent_commands()[0]
         .custom_data
         .downcast_ref::<RwLock<Fragments>>()
-        .expect("Expected to have passed a ChallengeData struct as custom_data");
+        .expect("Expected to have passed a Fragments struct as custom_data");
 
     let fragments = custom_data_lock.read().await;
-    let parts = generate_dino(fragments).await;
+    let parts = generate_dino(&ctx.data().database, fragments).await?;
 
     if parts.is_none() {
         ephemeral_message(
@@ -93,6 +107,10 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     let parts = parts.unwrap();
     let (bytes, image_path) = generate_dino_image(&parts)?;
     let image_file_name = image_path.file_name().unwrap().to_str().unwrap();
+
+    let mut conn = ctx.data().database.acquire().await?;
+    let mut transaction = conn.begin().await?;
+    insert_dino(&mut transaction, ctx.author().id.to_string(), &parts).await?;
 
     let author_name = name(ctx.author(), &ctx).await;
     let now = Utc::now().timestamp();
@@ -119,25 +137,46 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     })
     .await?;
 
+    transaction.commit().await?;
+
     Ok(())
 }
 
-async fn generate_dino(fragments: RwLockReadGuard<'_, Fragments>) -> Option<DinoParts> {
+async fn generate_dino(
+    db: &SqlitePool,
+    fragments: RwLockReadGuard<'_, Fragments>,
+) -> Result<Option<DinoParts>> {
     let mut tries = 0;
 
     loop {
         let generated = choose_parts(&fragments);
+        let is_duplicate = are_parts_duplicate(db, &generated).await?;
 
-        // TODO: check if it's a duplicate
-        if true {
-            break Some(generated);
+        if !is_duplicate {
+            return Ok(Some(generated));
         }
 
         tries += 1;
         if tries > MAX_GENERATION_ATTEMPTS {
-            return None;
+            return Ok(None);
         }
     }
+}
+
+async fn are_parts_duplicate(db: &SqlitePool, parts: &DinoParts) -> Result<bool> {
+    let body = get_file_stem(&parts.body);
+    let mouth = get_file_stem(&parts.mouth);
+    let eyes = get_file_stem(&parts.eyes);
+    let row = sqlx::query!(
+        "SELECT id FROM Dino WHERE body = ? AND mouth = ? AND eyes = ?",
+        body,
+        mouth,
+        eyes
+    )
+    .fetch_optional(db)
+    .await?;
+
+    Ok(row.is_some())
 }
 
 fn choose_parts(fragments: &Fragments) -> DinoParts {
@@ -193,10 +232,7 @@ fn generate_dino_name(parts: &DinoParts) -> String {
 }
 
 fn generate_dino_image(parts: &DinoParts) -> Result<(Vec<u8>, PathBuf)> {
-    let mut body = Reader::open(&parts.body)
-        .expect("Could not open file")
-        .decode()
-        .expect("Could not decode file");
+    let mut body = Reader::open(&parts.body)?.decode()?;
     let mouth = Reader::open(&parts.mouth)?.decode()?;
     let eyes = Reader::open(&parts.eyes)?.decode()?;
 
@@ -209,4 +245,54 @@ fn generate_dino_image(parts: &DinoParts) -> Result<(Vec<u8>, PathBuf)> {
     body.write_to(&mut Cursor::new(&mut bytes), ImageOutputFormat::Png)?;
 
     Ok((bytes, path))
+}
+
+async fn get_last_hatch(db: &SqlitePool, user_id: String) -> Result<NaiveDateTime> {
+    let row = sqlx::query!(
+        r#"INSERT OR IGNORE INTO DinoUser (id) VALUES (?);
+        SELECT last_hatch FROM DinoUser WHERE id = ?
+    "#,
+        user_id,
+        user_id,
+    )
+    .fetch_one(db)
+    .await?;
+
+    Ok(row.last_hatch)
+}
+
+async fn insert_dino(
+    conn: &mut SqliteConnection,
+    user_id: String,
+    parts: &DinoParts,
+) -> Result<()> {
+    let body = get_file_stem(&parts.body);
+    let mouth = get_file_stem(&parts.mouth);
+    let eyes = get_file_stem(&parts.eyes);
+
+    let row = sqlx::query!(
+        r#"INSERT INTO Dino (owner_id, name, filename, created_at, body, mouth, eyes)
+        VALUES (?, ?, ?, datetime('now'), ?, ?, ?)
+        RETURNING id"#,
+        user_id,
+        parts.name,
+        parts.name,
+        body,
+        mouth,
+        eyes
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+
+    sqlx::query!(
+        r#"INSERT INTO DinoTransactions (dino_id, user_id, type) VALUES (?, ?, 'HATCH');
+        UPDATE DinoUser SET last_hatch = datetime('now'), consecutive_fails = 0 WHERE id = ?"#,
+        row.id,
+        user_id,
+        user_id
+    )
+    .execute(&mut *conn)
+    .await?;
+
+    Ok(())
 }
