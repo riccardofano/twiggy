@@ -8,7 +8,7 @@ use std::{
 
 use chrono::{NaiveDateTime, Utc};
 use image::{imageops::overlay, io::Reader, ImageOutputFormat};
-use poise::serenity_prelude::AttachmentType;
+use poise::serenity_prelude::{AttachmentType, ButtonStyle, CreateActionRow};
 use rand::{seq::SliceRandom, thread_rng};
 use sqlx::{Acquire, SqliteConnection, SqlitePool};
 use tokio::sync::{RwLock, RwLockReadGuard};
@@ -37,6 +37,10 @@ const FRAGMENT_PATH: &str = "./assets/dino/fragments";
 const MAX_GENERATION_ATTEMPTS: usize = 20;
 const MAX_FAILED_HATCHES: i64 = 3;
 const HATCH_FAILS_TEXT: &[&str; 3] = &["1st", "2nd", "3rd"];
+
+pub const COVET_BUTTON: &str = "dino-covet";
+pub const SHUN_BUTTON: &str = "dino-shun";
+pub const FAVOURITE_BUTTON: &str = "dino-favourite";
 
 const HATCH_COOLDOWN: Duration = Duration::from_secs(10);
 
@@ -130,12 +134,34 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
 
     let mut conn = ctx.data().database.acquire().await?;
     let mut transaction = conn.begin().await?;
-    insert_dino(&mut transaction, ctx.author().id.to_string(), &parts).await?;
+    let dino_id = insert_dino(&mut transaction, ctx.author().id.to_string(), &parts).await?;
 
     let author_name = name(ctx.author(), &ctx).await;
     let now = Utc::now().timestamp();
+
+    let mut row = CreateActionRow::default();
+    row.create_button(|b| {
+        b.custom_id(format!("{COVET_BUTTON}:{dino_id}"))
+            .emoji('👍')
+            .label("Covet".to_string())
+            .style(ButtonStyle::Success)
+    });
+    row.create_button(|b| {
+        b.custom_id(format!("{SHUN_BUTTON}:{dino_id}"))
+            .emoji('👎')
+            .label("Shun".to_string())
+            .style(ButtonStyle::Danger)
+    });
+    row.create_button(|b| {
+        b.custom_id(format!("{FAVOURITE_BUTTON}:{dino_id}"))
+            .emoji('♥')
+            .label("Favourite".to_string())
+            .style(ButtonStyle::Primary)
+    });
+
     ctx.send(|message| {
         message
+            .components(|c| c.add_action_row(row))
             .attachment(AttachmentType::Bytes {
                 data: bytes.into(),
                 filename: image_file_name.to_string(),
@@ -301,7 +327,7 @@ async fn insert_dino(
     conn: &mut SqliteConnection,
     user_id: String,
     parts: &DinoParts,
-) -> Result<()> {
+) -> Result<i64> {
     let body = get_file_stem(&parts.body);
     let mouth = get_file_stem(&parts.mouth);
     let eyes = get_file_stem(&parts.eyes);
@@ -330,5 +356,5 @@ async fn insert_dino(
     .execute(&mut *conn)
     .await?;
 
-    Ok(())
+    Ok(row.id)
 }

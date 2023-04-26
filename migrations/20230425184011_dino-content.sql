@@ -35,6 +35,6 @@ CREATE TABLE DinoTransactions (
 INSERT INTO DinoTransactionType (type) VALUES ('HATCH');
 INSERT INTO DinoTransactionType (type) VALUES ('SLURP');
 INSERT INTO DinoTransactionType (type) VALUES ('GIFT');
-INSERT INTO DinoTransactionType (type) VALUES ('LIKE');
+INSERT INTO DinoTransactionType (type) VALUES ('COVET');
 INSERT INTO DinoTransactionType (type) VALUES ('SHUN');
 INSERT INTO DinoTransactionType (type) VALUES ('FAVOURITE');

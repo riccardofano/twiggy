@@ -11,6 +11,8 @@ pub async fn setup_rpg_summary(ctx: &serenity::Context, user_data: &Data) -> Res
         .filter(|f| f.data.custom_id == "rpg-summary")
         .build();
 
+    println!("Setup rpg summary collector");
+
     let _: Vec<_> = collector
         .then(|interaction| async move {
             let data = user_data.rpg_summary_cache.lock().await;

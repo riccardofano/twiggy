@@ -77,7 +77,10 @@ async fn event_event_handler(
     if let poise::Event::Ready { data_about_bot } = event {
         println!("{} is connected!", data_about_bot.user.name);
 
-        setup_rpg_summary(ctx, user_data).await?;
+        tokio::select! {
+                _ = setup_rpg_summary(ctx, user_data) => {}
+                _ = setup_dino_collector(ctx, user_data) => {}
+        }
     }
 
     Ok(())
