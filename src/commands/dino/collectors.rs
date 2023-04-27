@@ -15,6 +15,16 @@ enum TransactionType {
     Favourite,
 }
 
+impl TransactionType {
+    fn opposite(&self) -> Option<Self> {
+        match self {
+            Self::Covet => Some(Self::Shun),
+            Self::Shun => Some(Self::Covet),
+            Self::Favourite => None,
+        }
+    }
+}
+
 impl Display for TransactionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let kind = match self {
@@ -54,7 +64,7 @@ pub async fn setup_dino_collector(ctx: &serenity::Context, user_data: &Data) -> 
                 return interaction;
             }
 
-            let button_type = match &interaction.data.custom_id {
+            let button_type = match &custom_id {
                 b if b.starts_with(COVET_BUTTON) => TransactionType::Covet,
                 b if b.starts_with(SHUN_BUTTON) => TransactionType::Shun,
                 b if b.starts_with(FAVOURITE_BUTTON) => TransactionType::Favourite,
@@ -64,7 +74,10 @@ pub async fn setup_dino_collector(ctx: &serenity::Context, user_data: &Data) -> 
             let response =
                 handle_button_press(&interaction, db, dino_id.unwrap(), button_type).await;
 
-            // TODO: edit original message with new hotness value
+            if let Err(e) = response {
+                eprintln!("Failed to handle button ({custom_id}): {e}");
+                return interaction;
+            }
 
             if let Some(content) = response {
                 if let Err(e) = interaction
@@ -89,40 +102,36 @@ async fn handle_button_press(
     db: &SqlitePool,
     dino_id: &str,
     button_type: TransactionType,
-) -> Option<String> {
+) -> Result<Option<String>> {
     let user_id = interaction.user.id.to_string();
 
-    // FIXME NOTE: right now I'm not checking if there has been a old shun if I
-    // recieve a new covet or viceversa, I need to remove that one first and
-    // then add the covet but if there is a covet I just want to delete it to
-    // toggle it
-
     // TODO: use transaction instead of db
-    let dino_transaction = fetch_transaction(db, &user_id, dino_id, &button_type)
-        .await
-        .unwrap();
+    let same_type_transaction = fetch_transaction(db, &user_id, dino_id, &button_type).await?;
 
-    // TODO: better messages
-    match dino_transaction {
+    match same_type_transaction {
         Some(id) => {
-            if let Err(e) = delete_transaction(db, id).await {
-                eprintln!("Failed to delete/create transaction: {:?}", e);
-                return Some(format!(
-                    "Failed to {} dino",
-                    &button_type.to_string().to_lowercase()
+            delete_transaction(db, id).await?;
+            if matches!(button_type, TransactionType::Favourite) {
+                return Ok(Some(
+                    "Dino has been removed from your favourites".to_string(),
                 ));
-            };
-            None
+            }
+            Ok(None)
         }
         None => {
-            if let Err(e) = create_transaction(db, &user_id, dino_id, &button_type).await {
-                eprintln!("Failed to delete/create transaction: {:?}", e);
-                return Some(format!(
-                    "Failed to {} dino",
-                    button_type.to_string().to_lowercase()
-                ));
+            if let Some(opposite_type) = button_type.opposite() {
+                let opposite_transaction =
+                    fetch_transaction(db, &user_id, dino_id, &opposite_type).await?;
+                if let Some(id) = opposite_transaction {
+                    delete_transaction(db, id).await?;
+                }
             };
-            None
+
+            create_transaction(db, &user_id, dino_id, &button_type).await?;
+            if matches!(button_type, TransactionType::Favourite) {
+                return Ok(Some("Dino has been added to your favourites".to_string()));
+            }
+            Ok(None)
         }
     }
 }
