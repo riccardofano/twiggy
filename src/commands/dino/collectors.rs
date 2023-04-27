@@ -200,7 +200,9 @@ async fn fetch_transaction(
 ) -> Result<Option<i64>> {
     let transaction_type = transaction_type.to_string();
     let row = sqlx::query!(
-        "SELECT id FROM DinoTransactions WHERE type = ? AND dino_id = ? AND user_id = ?",
+        r#"INSERT OR IGNORE INTO DinoUser (id) VALUES (?);
+        SELECT id FROM DinoTransactions WHERE type = ? AND dino_id = ? AND user_id = ?"#,
+        user_id,
         transaction_type,
         dino_id,
         user_id
