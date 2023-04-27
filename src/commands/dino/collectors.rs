@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::Display;
 
 use poise::futures_util::StreamExt;
@@ -6,6 +7,7 @@ use poise::serenity_prelude::{ComponentInteractionCollectorBuilder, CreateEmbed}
 use sqlx::SqlitePool;
 
 use crate::commands::dino::{COVET_BUTTON, FAVOURITE_BUTTON, SHUN_BUTTON};
+use crate::common::Score;
 use crate::Data;
 use crate::Result;
 
@@ -71,8 +73,8 @@ pub async fn setup_dino_collector(ctx: &serenity::Context, user_data: &Data) -> 
                 _ => return interaction,
             };
 
-            let response =
-                handle_button_press(&interaction, db, dino_id.unwrap(), button_type).await;
+            let dino_id = dino_id.unwrap();
+            let response = handle_button_press(&interaction, db, dino_id, button_type).await;
 
             if let Err(e) = response {
                 eprintln!("Failed to handle button ({custom_id}): {e}");
@@ -94,15 +96,25 @@ pub async fn setup_dino_collector(ctx: &serenity::Context, user_data: &Data) -> 
                 }
             } else {
                 let old_embed = interaction.message.embeds[0].clone();
-                let dino_name = old_embed.title.clone().unwrap();
+                let old_image = old_embed.image.clone().unwrap();
+                let old_url: Vec<_> = old_image.url.split('/').collect();
+                let dino_image_name = old_url.last().unwrap();
+
+                let hotness = match calculate_dino_score(&user_data.database, dino_id).await {
+                    Ok(score) => score,
+                    Err(e) => {
+                        eprintln!("Failed to retrieve score. Error: {e}");
+                        return interaction;
+                    }
+                };
 
                 // NOTE: to update the old embed the attachment must be set the
                 // name of the file of the old image otherwise two images will
                 // appear, one outside the embed (the old file) and one in the
                 // embed with the new url discord gave it.
                 let mut new_embed = CreateEmbed::from(old_embed);
-                new_embed.footer(|f| f.text("New footer"));
-                new_embed.attachment(format!("{dino_name}.png"));
+                new_embed.footer(|f| f.text(format!("new score: {}", hotness)));
+                new_embed.attachment(dino_image_name);
 
                 let interaction_response = interaction
                     .create_interaction_response(&ctx, |response| {
@@ -208,4 +220,22 @@ async fn create_transaction(
     .await?;
 
     Ok(())
+}
+
+async fn calculate_dino_score(db: &SqlitePool, dino_id: &str) -> Result<i64> {
+    let row = sqlx::query!(
+        r#"SELECT COUNT(id) as count, type as type_ FROM DinoTransactions WHERE dino_id = ? GROUP BY type"#,
+        dino_id
+    )
+    .fetch_all(db)
+    .await?;
+
+    let mut map = HashMap::new();
+    for entry in row.into_iter() {
+        map.insert(entry.type_, entry.count);
+    }
+
+    let score = map.get("COVET").unwrap_or(&0) - map.get("SHUN").unwrap_or(&0);
+
+    Ok(score)
 }
