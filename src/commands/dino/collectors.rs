@@ -108,12 +108,6 @@ pub async fn setup_dino_collector(ctx: &serenity::Context, user_data: &Data) -> 
                     );
                 }
             } else {
-                let old_embed = interaction.message.embeds[0].clone();
-                let old_image = old_embed.image.clone().unwrap();
-                let old_url: Vec<_> = old_image.url.split('/').collect();
-                let dino_image_name = old_url.last().unwrap();
-                let dino_name = old_embed.title.clone().unwrap();
-
                 let (worth, hotness) = match calculate_dino_score(&mut transaction, dino_id).await {
                     Ok(score) => score,
                     Err(e) => {
@@ -121,11 +115,20 @@ pub async fn setup_dino_collector(ctx: &serenity::Context, user_data: &Data) -> 
                         return interaction;
                     }
                 };
+                let (dino_name, dino_image_name) =
+                    match fetch_dino_names(&mut transaction, dino_id).await {
+                        Ok(names) => names,
+                        Err(e) => {
+                            eprintln!("Failed to retrieve score. Error: {e}");
+                            return interaction;
+                        }
+                    };
 
                 // NOTE: to update the old embed the attachment must be set the
                 // name of the file of the old image otherwise two images will
                 // appear, one outside the embed (the old file) and one in the
                 // embed with the new url discord gave it.
+                let old_embed = interaction.message.embeds[0].clone();
                 let mut new_embed = CreateEmbed::from(old_embed);
                 new_embed.footer(|f| {
                     f.text(format!(
@@ -263,4 +266,19 @@ async fn calculate_dino_score(conn: &mut SqliteConnection, dino_id: &str) -> Res
     let hotness = map.get("COVET").unwrap_or(&0) - map.get("SHUN").unwrap_or(&0);
 
     Ok((total_transactions, hotness))
+}
+
+async fn fetch_dino_names(conn: &mut SqliteConnection, dino_id: &str) -> Result<(String, String)> {
+    let row = sqlx::query!("SELECT name, filename FROM Dino WHERE id = ?", dino_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+
+    match row {
+        Some(row) => Ok((row.name, row.filename)),
+        // TODO: maybe we should recover gracefully and send a message saying
+        // this dino doesn't exist anymore and remove the buttons.
+        None => Err(anyhow::anyhow!(
+            "Someone pressed a button for a dino that doesn't exist"
+        )),
+    }
 }

@@ -135,7 +135,13 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     let mut conn = ctx.data().database.acquire().await?;
     let mut transaction = conn.begin().await?;
     // TODO: set the filename to image_file_name which has the extension, not the name which doesn't
-    let dino_id = insert_dino(&mut transaction, ctx.author().id.to_string(), &parts).await?;
+    let dino_id = insert_dino(
+        &mut transaction,
+        &ctx.author().id.to_string(),
+        &parts,
+        image_file_name,
+    )
+    .await?;
 
     let author_name = name(ctx.author(), &ctx).await;
     let now = Utc::now().timestamp();
@@ -326,8 +332,9 @@ async fn get_user_record(db: &SqlitePool, user_id: String) -> Result<UserRecord>
 
 async fn insert_dino(
     conn: &mut SqliteConnection,
-    user_id: String,
+    user_id: &str,
     parts: &DinoParts,
+    file_name: &str,
 ) -> Result<i64> {
     let body = get_file_stem(&parts.body);
     let mouth = get_file_stem(&parts.mouth);
@@ -339,7 +346,7 @@ async fn insert_dino(
         RETURNING id"#,
         user_id,
         parts.name,
-        parts.name,
+        file_name,
         body,
         mouth,
         eyes
