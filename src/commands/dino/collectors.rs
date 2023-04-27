@@ -46,118 +46,82 @@ pub async fn setup_dino_collector(ctx: &serenity::Context, user_data: &Data) -> 
 
     let _: Vec<_> = collector
         .then(|interaction| async move {
-            let custom_id = &interaction.data.custom_id;
-            let dino_id = custom_id.split(':').collect::<Vec<_>>();
-            let dino_id = dino_id.get(1);
-
-            if dino_id.is_none() {
-                if let Err(e) = interaction
-                    .create_interaction_response(&ctx, |r| {
-                        r.interaction_response_data(|d| {
-                            d.content("Could not find dino id").ephemeral(true)
-                        })
-                    })
-                    .await
-                {
-                    eprintln!("Could not send failed to find dino id message {:?}", e)
-                };
-                return interaction;
+            if let Err(e) = handle_dino_collector(ctx, user_data, &interaction).await {
+                eprintln!("Error while handling dino collection: {e}");
             }
-
-            let button_type = match &custom_id {
-                b if b.starts_with(COVET_BUTTON) => TransactionType::Covet,
-                b if b.starts_with(SHUN_BUTTON) => TransactionType::Shun,
-                b if b.starts_with(FAVOURITE_BUTTON) => TransactionType::Favourite,
-                _ => return interaction,
-            };
-
-            let dino_id = dino_id.unwrap();
-            let mut conn = match user_data.database.acquire().await {
-                Ok(conn) => conn,
-                Err(e) => {
-                    eprintln!("Could not acquire database connection: {e}");
-                    return interaction;
-                }
-            };
-            let mut transaction = match conn.begin().await {
-                Ok(conn) => conn,
-                Err(e) => {
-                    eprintln!("Could not begin transaction: {e}");
-                    return interaction;
-                }
-            };
-            let response =
-                handle_button_press(&interaction, &mut transaction, dino_id, button_type).await;
-
-            if let Err(e) = response {
-                eprintln!("Failed to handle button ({custom_id}): {e}");
-                return interaction;
-            }
-
-            let response = response.unwrap();
-            if let Some(content) = response {
-                let interaction_response = interaction
-                    .create_interaction_response(&ctx, |r| {
-                        r.interaction_response_data(|d| d.content(&content).ephemeral(true))
-                    })
-                    .await;
-
-                if let Err(e) = interaction_response {
-                    eprintln!(
-                        "Failed to send interaction response. Content: {content}, error: {e}"
-                    );
-                }
-            } else {
-                let (worth, hotness) = match calculate_dino_score(&mut transaction, dino_id).await {
-                    Ok(score) => score,
-                    Err(e) => {
-                        eprintln!("Failed to retrieve score. Error: {e}");
-                        return interaction;
-                    }
-                };
-                let (dino_name, dino_image_name) =
-                    match fetch_dino_names(&mut transaction, dino_id).await {
-                        Ok(names) => names,
-                        Err(e) => {
-                            eprintln!("Failed to retrieve score. Error: {e}");
-                            return interaction;
-                        }
-                    };
-
-                // NOTE: to update the old embed the attachment must be set the
-                // name of the file of the old image otherwise two images will
-                // appear, one outside the embed (the old file) and one in the
-                // embed with the new url discord gave it.
-                let old_embed = interaction.message.embeds[0].clone();
-                let mut new_embed = CreateEmbed::from(old_embed);
-                new_embed.footer(|f| {
-                    f.text(format!(
-                        "{dino_name} is worth {worth} Dino Bucks!\nHotness Rating: {hotness}"
-                    ))
-                });
-                new_embed.attachment(dino_image_name);
-
-                let interaction_response = interaction
-                    .create_interaction_response(&ctx, |response| {
-                        response
-                            .kind(serenity::InteractionResponseType::UpdateMessage)
-                            .interaction_response_data(|d| d.set_embed(new_embed))
-                    })
-                    .await;
-
-                if let Err(e) = interaction_response {
-                    eprintln!("Failed to update old message: {e}");
-                }
-            }
-
-            if let Err(e) = transaction.commit().await {
-                eprintln!("Could not commit transaction: {e}")
-            };
 
             interaction
         })
         .collect()
         .await;
+
+    Ok(())
+}
+
+async fn handle_dino_collector(
+    ctx: &serenity::Context,
+    user_data: &Data,
+    interaction: &MessageComponentInteraction,
+) -> Result<()> {
+    let custom_id = &interaction.data.custom_id;
+    let dino_id = custom_id.split(':').collect::<Vec<_>>();
+    let dino_id = dino_id.get(1);
+
+    if dino_id.is_none() {
+        interaction
+            .create_interaction_response(&ctx, |r| {
+                r.interaction_response_data(|d| d.content("Could not find dino id").ephemeral(true))
+            })
+            .await?;
+        return Ok(());
+    }
+
+    let button_type = match &custom_id {
+        b if b.starts_with(COVET_BUTTON) => TransactionType::Covet,
+        b if b.starts_with(SHUN_BUTTON) => TransactionType::Shun,
+        b if b.starts_with(FAVOURITE_BUTTON) => TransactionType::Favourite,
+        _ => return Err(anyhow::anyhow!("unknown dino button pressed")),
+    };
+
+    let dino_id = dino_id.unwrap();
+    let mut conn = user_data.database.acquire().await?;
+    let mut transaction = conn.begin().await?;
+    let response = handle_button_press(interaction, &mut transaction, dino_id, button_type).await?;
+
+    if let Some(content) = response {
+        interaction
+            .create_interaction_response(&ctx, |r| {
+                r.interaction_response_data(|d| d.content(&content).ephemeral(true))
+            })
+            .await?;
+    } else {
+        let (worth, hotness) = calculate_dino_score(&mut transaction, dino_id).await?;
+        let (dino_name, dino_image_name) = fetch_dino_names(&mut transaction, dino_id).await?;
+
+        // NOTE: to update the old embed the attachment must be set the
+        // name of the file of the old image otherwise two images will
+        // appear, one outside the embed (the old file) and one in the
+        // embed with the new url discord gave it.
+        let old_embed = interaction.message.embeds[0].clone();
+        let mut new_embed = CreateEmbed::from(old_embed);
+        new_embed.title(&dino_name);
+        new_embed.footer(|f| {
+            f.text(format!(
+                "{dino_name} is worth {worth} Dino Bucks!\nHotness Rating: {hotness}"
+            ))
+        });
+        new_embed.attachment(dino_image_name);
+
+        interaction
+            .create_interaction_response(&ctx, |response| {
+                response
+                    .kind(serenity::InteractionResponseType::UpdateMessage)
+                    .interaction_response_data(|d| d.set_embed(new_embed))
+            })
+            .await?;
+    }
+
+    transaction.commit().await?;
 
     Ok(())
 }
