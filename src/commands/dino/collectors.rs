@@ -112,8 +112,9 @@ pub async fn setup_dino_collector(ctx: &serenity::Context, user_data: &Data) -> 
                 let old_image = old_embed.image.clone().unwrap();
                 let old_url: Vec<_> = old_image.url.split('/').collect();
                 let dino_image_name = old_url.last().unwrap();
+                let dino_name = old_embed.title.clone().unwrap();
 
-                let hotness = match calculate_dino_score(&mut transaction, dino_id).await {
+                let (worth, hotness) = match calculate_dino_score(&mut transaction, dino_id).await {
                     Ok(score) => score,
                     Err(e) => {
                         eprintln!("Failed to retrieve score. Error: {e}");
@@ -126,7 +127,11 @@ pub async fn setup_dino_collector(ctx: &serenity::Context, user_data: &Data) -> 
                 // appear, one outside the embed (the old file) and one in the
                 // embed with the new url discord gave it.
                 let mut new_embed = CreateEmbed::from(old_embed);
-                new_embed.footer(|f| f.text(format!("new score: {}", hotness)));
+                new_embed.footer(|f| {
+                    f.text(format!(
+                        "{dino_name} is worth {worth} Dino Bucks!\nHotness Rating: {hotness}"
+                    ))
+                });
                 new_embed.attachment(dino_image_name);
 
                 let interaction_response = interaction
@@ -142,9 +147,9 @@ pub async fn setup_dino_collector(ctx: &serenity::Context, user_data: &Data) -> 
                 }
             }
 
-                if let Err(e) = transaction.commit().await {
-                    eprintln!("Could not commit transaction: {e}")
-                };
+            if let Err(e) = transaction.commit().await {
+                eprintln!("Could not commit transaction: {e}")
+            };
 
             interaction
         })
@@ -240,7 +245,7 @@ async fn create_transaction(
     Ok(())
 }
 
-async fn calculate_dino_score(conn: &mut SqliteConnection, dino_id: &str) -> Result<i64> {
+async fn calculate_dino_score(conn: &mut SqliteConnection, dino_id: &str) -> Result<(i64, i64)> {
     let row = sqlx::query!(
         r#"SELECT COUNT(id) as count, type as type_ FROM DinoTransactions WHERE dino_id = ? GROUP BY type"#,
         dino_id
@@ -249,11 +254,13 @@ async fn calculate_dino_score(conn: &mut SqliteConnection, dino_id: &str) -> Res
     .await?;
 
     let mut map = HashMap::new();
+    let mut total_transactions = 0;
     for entry in row.into_iter() {
         map.insert(entry.type_, entry.count);
+        total_transactions += entry.count;
     }
 
-    let score = map.get("COVET").unwrap_or(&0) - map.get("SHUN").unwrap_or(&0);
+    let hotness = map.get("COVET").unwrap_or(&0) - map.get("SHUN").unwrap_or(&0);
 
-    Ok(score)
+    Ok((total_transactions, hotness))
 }

@@ -134,6 +134,7 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
 
     let mut conn = ctx.data().database.acquire().await?;
     let mut transaction = conn.begin().await?;
+    // TODO: set the filename to image_file_name which has the extension, not the name which doesn't
     let dino_id = insert_dino(&mut transaction, ctx.author().id.to_string(), &parts).await?;
 
     let author_name = name(ctx.author(), &ctx).await;
