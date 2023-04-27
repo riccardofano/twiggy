@@ -4,10 +4,9 @@ use std::fmt::Display;
 use poise::futures_util::StreamExt;
 use poise::serenity_prelude::{self as serenity, MessageComponentInteraction};
 use poise::serenity_prelude::{ComponentInteractionCollectorBuilder, CreateEmbed};
-use sqlx::SqlitePool;
+use sqlx::{Acquire, SqliteConnection};
 
 use crate::commands::dino::{COVET_BUTTON, FAVOURITE_BUTTON, SHUN_BUTTON};
-use crate::common::Score;
 use crate::Data;
 use crate::Result;
 
@@ -47,7 +46,6 @@ pub async fn setup_dino_collector(ctx: &serenity::Context, user_data: &Data) -> 
 
     let _: Vec<_> = collector
         .then(|interaction| async move {
-            let db = &user_data.database;
             let custom_id = &interaction.data.custom_id;
             let dino_id = custom_id.split(':').collect::<Vec<_>>();
             let dino_id = dino_id.get(1);
@@ -74,7 +72,22 @@ pub async fn setup_dino_collector(ctx: &serenity::Context, user_data: &Data) -> 
             };
 
             let dino_id = dino_id.unwrap();
-            let response = handle_button_press(&interaction, db, dino_id, button_type).await;
+            let mut conn = match user_data.database.acquire().await {
+                Ok(conn) => conn,
+                Err(e) => {
+                    eprintln!("Could not acquire database connection: {e}");
+                    return interaction;
+                }
+            };
+            let mut transaction = match conn.begin().await {
+                Ok(conn) => conn,
+                Err(e) => {
+                    eprintln!("Could not begin transaction: {e}");
+                    return interaction;
+                }
+            };
+            let response =
+                handle_button_press(&interaction, &mut transaction, dino_id, button_type).await;
 
             if let Err(e) = response {
                 eprintln!("Failed to handle button ({custom_id}): {e}");
@@ -100,7 +113,7 @@ pub async fn setup_dino_collector(ctx: &serenity::Context, user_data: &Data) -> 
                 let old_url: Vec<_> = old_image.url.split('/').collect();
                 let dino_image_name = old_url.last().unwrap();
 
-                let hotness = match calculate_dino_score(&user_data.database, dino_id).await {
+                let hotness = match calculate_dino_score(&mut transaction, dino_id).await {
                     Ok(score) => score,
                     Err(e) => {
                         eprintln!("Failed to retrieve score. Error: {e}");
@@ -125,8 +138,12 @@ pub async fn setup_dino_collector(ctx: &serenity::Context, user_data: &Data) -> 
                     .await;
 
                 if let Err(e) = interaction_response {
-                    eprintln!("Failed to update old message. Error: {e}");
+                    eprintln!("Failed to update old message: {e}");
                 }
+
+                if let Err(e) = transaction.commit().await {
+                    eprintln!("Could not commit transaction: {e}")
+                };
             }
 
             interaction
@@ -139,18 +156,17 @@ pub async fn setup_dino_collector(ctx: &serenity::Context, user_data: &Data) -> 
 
 async fn handle_button_press(
     interaction: &MessageComponentInteraction,
-    db: &SqlitePool,
+    conn: &mut SqliteConnection,
     dino_id: &str,
     button_type: TransactionType,
 ) -> Result<Option<String>> {
     let user_id = interaction.user.id.to_string();
 
-    // TODO: use transaction instead of db
-    let same_type_transaction = fetch_transaction(db, &user_id, dino_id, &button_type).await?;
+    let same_type_transaction = fetch_transaction(conn, &user_id, dino_id, &button_type).await?;
 
     match same_type_transaction {
         Some(id) => {
-            delete_transaction(db, id).await?;
+            delete_transaction(conn, id).await?;
             if matches!(button_type, TransactionType::Favourite) {
                 return Ok(Some(
                     "Dino has been removed from your favourites".to_string(),
@@ -161,13 +177,13 @@ async fn handle_button_press(
         None => {
             if let Some(opposite_type) = button_type.opposite() {
                 let opposite_transaction =
-                    fetch_transaction(db, &user_id, dino_id, &opposite_type).await?;
+                    fetch_transaction(conn, &user_id, dino_id, &opposite_type).await?;
                 if let Some(id) = opposite_transaction {
-                    delete_transaction(db, id).await?;
+                    delete_transaction(conn, id).await?;
                 }
             };
 
-            create_transaction(db, &user_id, dino_id, &button_type).await?;
+            create_transaction(conn, &user_id, dino_id, &button_type).await?;
             if matches!(button_type, TransactionType::Favourite) {
                 return Ok(Some("Dino has been added to your favourites".to_string()));
             }
@@ -177,7 +193,7 @@ async fn handle_button_press(
 }
 
 async fn fetch_transaction(
-    db: &SqlitePool,
+    conn: &mut SqliteConnection,
     user_id: &str,
     dino_id: &str,
     transaction_type: &TransactionType,
@@ -189,22 +205,22 @@ async fn fetch_transaction(
         dino_id,
         user_id
     )
-    .fetch_optional(db)
+    .fetch_optional(&mut *conn)
     .await?;
 
     Ok(row.map(|r| r.id))
 }
 
-async fn delete_transaction(db: &SqlitePool, transaction_id: i64) -> Result<()> {
+async fn delete_transaction(conn: &mut SqliteConnection, transaction_id: i64) -> Result<()> {
     sqlx::query!("DELETE FROM DinoTransactions WHERE id = ?", transaction_id)
-        .execute(db)
+        .execute(&mut *conn)
         .await?;
 
     Ok(())
 }
 
 async fn create_transaction(
-    db: &SqlitePool,
+    conn: &mut SqliteConnection,
     user_id: &str,
     dino_id: &str,
     transaction_type: &TransactionType,
@@ -216,18 +232,18 @@ async fn create_transaction(
         dino_id,
         transaction_type
     )
-    .execute(db)
+    .execute(&mut *conn)
     .await?;
 
     Ok(())
 }
 
-async fn calculate_dino_score(db: &SqlitePool, dino_id: &str) -> Result<i64> {
+async fn calculate_dino_score(conn: &mut SqliteConnection, dino_id: &str) -> Result<i64> {
     let row = sqlx::query!(
         r#"SELECT COUNT(id) as count, type as type_ FROM DinoTransactions WHERE dino_id = ? GROUP BY type"#,
         dino_id
     )
-    .fetch_all(db)
+    .fetch_all(&mut *conn)
     .await?;
 
     let mut map = HashMap::new();
