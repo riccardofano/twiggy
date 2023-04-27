@@ -1,8 +1,8 @@
 use std::fmt::Display;
 
 use poise::futures_util::StreamExt;
-use poise::serenity_prelude::ComponentInteractionCollectorBuilder;
 use poise::serenity_prelude::{self as serenity, MessageComponentInteraction};
+use poise::serenity_prelude::{ComponentInteractionCollectorBuilder, CreateEmbed};
 use sqlx::SqlitePool;
 
 use crate::commands::dino::{COVET_BUTTON, FAVOURITE_BUTTON, SHUN_BUTTON};
@@ -79,16 +79,44 @@ pub async fn setup_dino_collector(ctx: &serenity::Context, user_data: &Data) -> 
                 return interaction;
             }
 
+            let response = response.unwrap();
             if let Some(content) = response {
-                if let Err(e) = interaction
+                let interaction_response = interaction
                     .create_interaction_response(&ctx, |r| {
-                        r.interaction_response_data(|d| d.content(content).ephemeral(true))
+                        r.interaction_response_data(|d| d.content(&content).ephemeral(true))
                     })
-                    .await
-                {
-                    eprintln!("Failed to send interaction response: {:?}", e);
+                    .await;
+
+                if let Err(e) = interaction_response {
+                    eprintln!(
+                        "Failed to send interaction response. Content: {content}, error: {e}"
+                    );
+                }
+            } else {
+                let old_embed = interaction.message.embeds[0].clone();
+                let dino_name = old_embed.title.clone().unwrap();
+
+                // NOTE: to update the old embed the attachment must be set the
+                // name of the file of the old image otherwise two images will
+                // appear, one outside the embed (the old file) and one in the
+                // embed with the new url discord gave it.
+                let mut new_embed = CreateEmbed::from(old_embed);
+                new_embed.footer(|f| f.text("New footer"));
+                new_embed.attachment(format!("{dino_name}.png"));
+
+                let interaction_response = interaction
+                    .create_interaction_response(&ctx, |response| {
+                        response
+                            .kind(serenity::InteractionResponseType::UpdateMessage)
+                            .interaction_response_data(|d| d.set_embed(new_embed))
+                    })
+                    .await;
+
+                if let Err(e) = interaction_response {
+                    eprintln!("Failed to update old message. Error: {e}");
                 }
             }
+
             interaction
         })
         .collect()
