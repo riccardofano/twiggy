@@ -140,11 +140,11 @@ pub async fn setup_dino_collector(ctx: &serenity::Context, user_data: &Data) -> 
                 if let Err(e) = interaction_response {
                     eprintln!("Failed to update old message: {e}");
                 }
+            }
 
                 if let Err(e) = transaction.commit().await {
                     eprintln!("Could not commit transaction: {e}")
                 };
-            }
 
             interaction
         })
