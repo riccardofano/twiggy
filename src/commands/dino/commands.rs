@@ -36,6 +36,8 @@ struct DinoParts {
 }
 
 const FRAGMENT_PATH: &str = "./assets/dino/fragments";
+const OUTPUT_PATH: &str = "./assets/dino/complete";
+
 const DINO_IMAGE_SIZE: u32 = 112;
 const COLUMN_MARGIN: u32 = 2;
 const ROW_MARGIN: u32 = 2;
@@ -136,16 +138,12 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     }
 
     let parts = parts.unwrap();
-    let (image, image_path) = generate_dino_image(&parts)?;
-
-    let mut bytes: Vec<u8> = Vec::new();
-    image.write_to(&mut Cursor::new(&mut bytes), ImageOutputFormat::Png)?;
-
+    let image_path = generate_dino_image(&parts)?;
     let image_file_name = image_path.file_name().unwrap().to_str().unwrap();
 
     let mut conn = ctx.data().database.acquire().await?;
     let mut transaction = conn.begin().await?;
-    // TODO: set the filename to image_file_name which has the extension, not the name which doesn't
+
     let dino_id = insert_dino(
         &mut transaction,
         &ctx.author().id.to_string(),
@@ -180,10 +178,7 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     ctx.send(|message| {
         message
             .components(|c| c.add_action_row(row))
-            .attachment(AttachmentType::Bytes {
-                data: bytes.into(),
-                filename: image_file_name.to_string(),
-            })
+            .attachment(AttachmentType::Path(&image_path))
             .embed(|embed| {
                 embed
                     .colour(0x66ff99)
@@ -333,7 +328,7 @@ fn generate_dino_name(parts: &DinoParts) -> String {
     )
 }
 
-fn generate_dino_image(parts: &DinoParts) -> Result<(DynamicImage, PathBuf)> {
+fn generate_dino_image(parts: &DinoParts) -> Result<PathBuf> {
     let mut body = Reader::open(&parts.body)?.decode()?;
     let mouth = Reader::open(&parts.mouth)?.decode()?;
     let eyes = Reader::open(&parts.eyes)?.decode()?;
@@ -341,12 +336,36 @@ fn generate_dino_image(parts: &DinoParts) -> Result<(DynamicImage, PathBuf)> {
     overlay(&mut body, &mouth, 0, 0);
     overlay(&mut body, &eyes, 0, 0);
 
-    let path = temp_dir().join(&parts.name).with_extension("png");
+    let output_path = Path::new(OUTPUT_PATH);
+    let path = output_path.join(&parts.name).with_extension("png");
+    body.save_with_format(&path, image::ImageFormat::Png)?;
+
+    Ok(path)
+}
+
+fn generate_dino_collection_image(collection: &[DinoRecord]) -> Result<Vec<u8>> {
+    let columns = (collection.len() as f32).sqrt().ceil() as u32;
+    let rows = (collection.len() as f32 / columns as f32).ceil() as u32;
+
+    let width: u32 = columns * DINO_IMAGE_SIZE + (columns - 1) * COLUMN_MARGIN;
+    let height: u32 = rows * DINO_IMAGE_SIZE + (rows - 1) * ROW_MARGIN;
+
+    let output_path = Path::new(OUTPUT_PATH);
+
+    // TODO: remember to delete the image when the dino gets deleted
+    let mut image: RgbaImage = ImageBuffer::new(width, height);
+    for (i, dino) in collection.iter().enumerate() {
+        let x = (i as u32 % columns) * (COLUMN_MARGIN + DINO_IMAGE_SIZE);
+        let y = (i as f32 / columns as f32).floor() as u32 * (ROW_MARGIN + DINO_IMAGE_SIZE);
+
+        let dino_image = Reader::open(output_path.join(&dino.filename))?.decode()?;
+        overlay(&mut image, &dino_image, x.into(), y.into());
+    }
 
     let mut bytes: Vec<u8> = Vec::new();
-    body.write_to(&mut Cursor::new(&mut bytes), ImageOutputFormat::Png)?;
+    image.write_to(&mut Cursor::new(&mut bytes), ImageOutputFormat::Png)?;
 
-    Ok((bytes, path))
+    Ok(bytes)
 }
 
 struct UserRecord {
@@ -406,24 +425,19 @@ async fn insert_dino(
 }
 
 struct DinoRecord {
-    name: String,
-    body: String,
-    mouth: String,
-    eyes: String,
+    filename: String,
 }
 
 async fn fetch_collection(db: &SqlitePool, user_id: &str) -> Result<Vec<DinoRecord>> {
     let rows = sqlx::query_as!(
         DinoRecord,
         r#"INSERT OR IGNORE INTO DinoUser (id) VALUES (?);
-        SELECT name, body, mouth, eyes FROM Dino WHERE owner_id = ? LIMIT 25"#,
+        SELECT filename FROM Dino WHERE owner_id = ? LIMIT 25"#,
         user_id,
         user_id
     )
     .fetch_all(db)
     .await?;
-
-    dbg!(rows.len());
 
     Ok(rows)
 }
