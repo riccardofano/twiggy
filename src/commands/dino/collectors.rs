@@ -76,6 +76,34 @@ async fn handle_dino_collector(
         return Ok(());
     }
 
+    let dino_id = dino_id.unwrap();
+    let mut conn = user_data.database.acquire().await?;
+    let mut transaction = conn.begin().await?;
+    let dino = fetch_dino_names(&mut transaction, dino_id).await?;
+
+    if dino.is_none() {
+        let old_embed = interaction.message.embeds[0].clone();
+        let dino_name = old_embed.title.clone().unwrap();
+        let old_image = old_embed.image.clone().unwrap();
+        let split_url = old_image.url.split('/').collect::<Vec<_>>();
+        let dino_image_name = split_url.last().unwrap();
+
+        let mut new_embed = CreateEmbed::from(old_embed);
+        new_embed.attachment(dino_image_name);
+        new_embed.title(format!("{dino_name} is no longer with us 😔"));
+
+        interaction
+            .create_interaction_response(&ctx, |response| {
+                response
+                    .kind(serenity::InteractionResponseType::UpdateMessage)
+                    .interaction_response_data(|d| d.set_embed(new_embed).components(|c| c))
+            })
+            .await?;
+        return Ok(());
+    }
+
+    let (dino_name, dino_image_name) = dino.unwrap();
+
     let button_type = match &custom_id {
         b if b.starts_with(COVET_BUTTON) => TransactionType::Covet,
         b if b.starts_with(SHUN_BUTTON) => TransactionType::Shun,
@@ -83,9 +111,6 @@ async fn handle_dino_collector(
         _ => return Err(anyhow::anyhow!("unknown dino button pressed")),
     };
 
-    let dino_id = dino_id.unwrap();
-    let mut conn = user_data.database.acquire().await?;
-    let mut transaction = conn.begin().await?;
     let response = handle_button_press(interaction, &mut transaction, dino_id, button_type).await?;
 
     if let Some(content) = response {
@@ -96,7 +121,6 @@ async fn handle_dino_collector(
             .await?;
     } else {
         let (worth, hotness) = calculate_dino_score(&mut transaction, dino_id).await?;
-        let (dino_name, dino_image_name) = fetch_dino_names(&mut transaction, dino_id).await?;
 
         // NOTE: to update the old embed the attachment must be set the
         // name of the file of the old image otherwise two images will
@@ -232,17 +256,18 @@ async fn calculate_dino_score(conn: &mut SqliteConnection, dino_id: &str) -> Res
     Ok((total_transactions, hotness))
 }
 
-async fn fetch_dino_names(conn: &mut SqliteConnection, dino_id: &str) -> Result<(String, String)> {
+async fn fetch_dino_names(
+    conn: &mut SqliteConnection,
+    dino_id: &str,
+) -> Result<Option<(String, String)>> {
     let row = sqlx::query!("SELECT name, filename FROM Dino WHERE id = ?", dino_id)
         .fetch_optional(&mut *conn)
         .await?;
 
     match row {
-        Some(row) => Ok((row.name, row.filename)),
+        Some(row) => Ok(Some((row.name, row.filename))),
         // TODO: maybe we should recover gracefully and send a message saying
         // this dino doesn't exist anymore and remove the buttons.
-        None => Err(anyhow::anyhow!(
-            "Someone pressed a button for a dino that doesn't exist"
-        )),
+        None => Ok(None),
     }
 }
