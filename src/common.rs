@@ -48,6 +48,12 @@ pub async fn colour(ctx: &Context<'_>) -> Option<Colour> {
     return member(ctx).await?.colour(ctx);
 }
 
+pub fn avatar_url(person: &User) -> String {
+    person
+        .avatar_url()
+        .unwrap_or_else(|| person.default_avatar_url())
+}
+
 pub enum Score {
     Win,
     Loss,
