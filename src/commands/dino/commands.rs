@@ -7,7 +7,9 @@ use std::{
 };
 
 use chrono::{NaiveDateTime, Utc};
-use image::{imageops::overlay, io::Reader, ImageOutputFormat};
+use image::{
+    imageops::overlay, io::Reader, DynamicImage, ImageBuffer, ImageOutputFormat, RgbaImage,
+};
 use poise::serenity_prelude::{AttachmentType, ButtonStyle, CreateActionRow};
 use rand::{seq::SliceRandom, thread_rng};
 use sqlx::{Acquire, SqliteConnection, SqlitePool};
@@ -34,6 +36,10 @@ struct DinoParts {
 }
 
 const FRAGMENT_PATH: &str = "./assets/dino/fragments";
+const DINO_IMAGE_SIZE: u32 = 112;
+const COLUMN_MARGIN: u32 = 2;
+const ROW_MARGIN: u32 = 2;
+
 const MAX_GENERATION_ATTEMPTS: usize = 20;
 const MAX_FAILED_HATCHES: i64 = 3;
 const HATCH_FAILS_TEXT: &[&str; 3] = &["1st", "2nd", "3rd"];
@@ -71,7 +77,7 @@ fn setup_dinos() -> RwLock<Fragments> {
 #[poise::command(
     slash_command,
     guild_only,
-    subcommands("hatch"),
+    subcommands("hatch", "collection"),
     custom_data = "setup_dinos()"
 )]
 pub async fn dino(_ctx: Context<'_>) -> Result<()> {
@@ -83,7 +89,8 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     let now = Utc::now().naive_utc();
     let hatch_cooldown_duration = chrono::Duration::from_std(HATCH_COOLDOWN)?;
 
-    let hatcher_record = get_user_record(&ctx.data().database, ctx.author().id.to_string()).await?;
+    let hatcher_record =
+        get_user_record(&ctx.data().database, &ctx.author().id.to_string()).await?;
     if hatcher_record.last_hatch + hatch_cooldown_duration > now {
         // TODO: better message
         ephemeral_message(ctx, "Can't hatch yet").await?;
@@ -129,7 +136,11 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     }
 
     let parts = parts.unwrap();
-    let (bytes, image_path) = generate_dino_image(&parts)?;
+    let (image, image_path) = generate_dino_image(&parts)?;
+
+    let mut bytes: Vec<u8> = Vec::new();
+    image.write_to(&mut Cursor::new(&mut bytes), ImageOutputFormat::Png)?;
+
     let image_file_name = image_path.file_name().unwrap().to_str().unwrap();
 
     let mut conn = ctx.data().database.acquire().await?;
@@ -191,6 +202,29 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     .await?;
 
     transaction.commit().await?;
+
+    Ok(())
+}
+
+#[poise::command(slash_command, guild_only)]
+async fn collection(ctx: Context<'_>, silent: Option<bool>) -> Result<()> {
+    let silent = silent.unwrap_or(true);
+
+    let db = &ctx.data().database;
+    let dinos = fetch_collection(db, &ctx.author().id.to_string()).await?;
+    let image = generate_dino_collection_image(&dinos)?;
+    let filename = format!("{}_collection.png", ctx.author().name);
+
+    ctx.send(|message| {
+        message
+            .attachment(AttachmentType::Bytes {
+                data: image.into(),
+                filename: filename.clone(),
+            })
+            .embed(|embed| embed.colour(0x66ff99).attachment(&filename))
+            .ephemeral(silent)
+    })
+    .await?;
 
     Ok(())
 }
@@ -272,6 +306,10 @@ fn choose_parts(fragments: &Fragments) -> DinoParts {
     parts
 }
 
+fn get_file_name(path: &Path) -> &str {
+    path.file_name().unwrap().to_str().unwrap()
+}
+
 fn get_file_stem(path: &Path) -> &str {
     path.file_stem().unwrap().to_str().unwrap()
 }
@@ -295,7 +333,7 @@ fn generate_dino_name(parts: &DinoParts) -> String {
     )
 }
 
-fn generate_dino_image(parts: &DinoParts) -> Result<(Vec<u8>, PathBuf)> {
+fn generate_dino_image(parts: &DinoParts) -> Result<(DynamicImage, PathBuf)> {
     let mut body = Reader::open(&parts.body)?.decode()?;
     let mouth = Reader::open(&parts.mouth)?.decode()?;
     let eyes = Reader::open(&parts.eyes)?.decode()?;
@@ -316,7 +354,7 @@ struct UserRecord {
     consecutive_fails: i64,
 }
 
-async fn get_user_record(db: &SqlitePool, user_id: String) -> Result<UserRecord> {
+async fn get_user_record(db: &SqlitePool, user_id: &str) -> Result<UserRecord> {
     let row = sqlx::query_as!(
         UserRecord,
         r#"INSERT OR IGNORE INTO DinoUser (id) VALUES (?);
@@ -336,9 +374,9 @@ async fn insert_dino(
     parts: &DinoParts,
     file_name: &str,
 ) -> Result<i64> {
-    let body = get_file_stem(&parts.body);
-    let mouth = get_file_stem(&parts.mouth);
-    let eyes = get_file_stem(&parts.eyes);
+    let body = get_file_name(&parts.body);
+    let mouth = get_file_name(&parts.mouth);
+    let eyes = get_file_name(&parts.eyes);
 
     let row = sqlx::query!(
         r#"INSERT INTO Dino (owner_id, name, filename, created_at, body, mouth, eyes)
@@ -365,4 +403,27 @@ async fn insert_dino(
     .await?;
 
     Ok(row.id)
+}
+
+struct DinoRecord {
+    name: String,
+    body: String,
+    mouth: String,
+    eyes: String,
+}
+
+async fn fetch_collection(db: &SqlitePool, user_id: &str) -> Result<Vec<DinoRecord>> {
+    let rows = sqlx::query_as!(
+        DinoRecord,
+        r#"INSERT OR IGNORE INTO DinoUser (id) VALUES (?);
+        SELECT name, body, mouth, eyes FROM Dino WHERE owner_id = ? LIMIT 25"#,
+        user_id,
+        user_id
+    )
+    .fetch_all(db)
+    .await?;
+
+    dbg!(rows.len());
+
+    Ok(rows)
 }
