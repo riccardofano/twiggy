@@ -250,6 +250,24 @@ async fn collection(ctx: Context<'_>, silent: Option<bool>) -> Result<()> {
     Ok(())
 }
 
+#[poise::command(slash_command, guild_only, prefix_command)]
+async fn rename(ctx: Context<'_>, dino_name: String, new_name: String) -> Result<()> {
+    let Some(dino_id) = get_dino_id(&ctx.data().database, &dino_name).await? else {
+        ephemeral_message(ctx, "The name of the dino you specified was not found.").await?;
+        return Ok(());
+    };
+
+    if !user_owns_dino(&ctx.data().database, dino_id, &ctx.author().id.to_string()).await? {
+        ephemeral_message(ctx, "You don't own this dino, you can't rename it.").await?;
+        return Ok(());
+    }
+
+    update_dino_name(&ctx.data().database, dino_id, &new_name).await?;
+    ephemeral_message(ctx, format!("Dino name has been update to {new_name}!")).await?;
+
+    Ok(())
+}
+
 async fn update_failed_hatches(db: &SqlitePool, user_id: String) -> Result<()> {
     sqlx::query!(
         "UPDATE DinoUser SET consecutive_fails = consecutive_fails + 1 WHERE id = ?",
@@ -490,4 +508,32 @@ async fn fetch_collection(db: &SqlitePool, user_id: &str) -> Result<DinoCollecti
         transaction_count: row.trans_count.unwrap_or(0.0) as i32,
         dinos: rows,
     })
+}
+
+async fn get_dino_id(db: &SqlitePool, dino_name: &str) -> Result<Option<i64>> {
+    let row = sqlx::query!("SELECT id FROM Dino WHERE name = ?", dino_name)
+        .fetch_optional(db)
+        .await?;
+
+    Ok(row.map(|r| r.id))
+}
+
+async fn user_owns_dino(db: &SqlitePool, dino_id: i64, user_id: &str) -> Result<bool> {
+    let row = sqlx::query!(
+        "SELECT id FROM Dino WHERE id = ? AND owner_id = ?",
+        dino_id,
+        user_id
+    )
+    .fetch_optional(db)
+    .await?;
+
+    Ok(row.is_some())
+}
+
+async fn update_dino_name(db: &SqlitePool, dino_id: i64, new_name: &str) -> Result<()> {
+    sqlx::query!("UPDATE Dino SET name = ? WHERE id = ?", new_name, dino_id)
+        .execute(db)
+        .await?;
+
+    Ok(())
 }
