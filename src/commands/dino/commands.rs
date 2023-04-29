@@ -280,9 +280,9 @@ async fn generate_dino(
 }
 
 async fn are_parts_duplicate(db: &SqlitePool, parts: &DinoParts) -> Result<bool> {
-    let body = get_file_stem(&parts.body);
-    let mouth = get_file_stem(&parts.mouth);
-    let eyes = get_file_stem(&parts.eyes);
+    let body = get_file_name(&parts.body);
+    let mouth = get_file_name(&parts.mouth);
+    let eyes = get_file_name(&parts.eyes);
     let row = sqlx::query!(
         "SELECT id FROM Dino WHERE body = ? AND mouth = ? AND eyes = ?",
         body,
