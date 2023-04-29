@@ -2,18 +2,19 @@ use std::{
     fs,
     io::Cursor,
     path::{Path, PathBuf},
+    str::FromStr,
     time::Duration,
 };
 
 use chrono::{NaiveDateTime, Utc};
 use image::{imageops::overlay, io::Reader, ImageBuffer, ImageOutputFormat, RgbaImage};
-use poise::serenity_prelude::{AttachmentType, ButtonStyle, CreateActionRow};
+use poise::serenity_prelude::{AttachmentType, ButtonStyle, CreateActionRow, UserId};
 use rand::{seq::SliceRandom, thread_rng};
 use sqlx::{Acquire, SqliteConnection, SqlitePool};
 use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::{
-    common::{avatar_url, ephemeral_message, name, pick_best_x_dice_rolls},
+    common::{avatar_url, ephemeral_message, name as get_name, pick_best_x_dice_rolls},
     Context, Result,
 };
 
@@ -76,7 +77,7 @@ fn setup_dinos() -> RwLock<Fragments> {
 #[poise::command(
     slash_command,
     guild_only,
-    subcommands("hatch", "collection"),
+    subcommands("hatch", "collection", "rename", "view"),
     custom_data = "setup_dinos()"
 )]
 pub async fn dino(_ctx: Context<'_>) -> Result<()> {
@@ -136,7 +137,6 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
 
     let parts = parts.unwrap();
     let image_path = generate_dino_image(&parts)?;
-    let image_file_name = image_path.file_name().unwrap().to_str().unwrap();
 
     let mut conn = ctx.data().database.acquire().await?;
     let mut transaction = conn.begin().await?;
@@ -145,53 +145,12 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
         &mut transaction,
         &ctx.author().id.to_string(),
         &parts,
-        image_file_name,
+        &image_path,
     )
     .await?;
 
-    let author_name = name(ctx.author(), &ctx).await;
-    let now = Utc::now().timestamp();
-
-    let mut row = CreateActionRow::default();
-    row.create_button(|b| {
-        b.custom_id(format!("{COVET_BUTTON}:{dino_id}"))
-            .emoji('👍')
-            .label("Covet".to_string())
-            .style(ButtonStyle::Success)
-    });
-    row.create_button(|b| {
-        b.custom_id(format!("{SHUN_BUTTON}:{dino_id}"))
-            .emoji('👎')
-            .label("Shun".to_string())
-            .style(ButtonStyle::Danger)
-    });
-    row.create_button(|b| {
-        b.custom_id(format!("{FAVOURITE_BUTTON}:{dino_id}"))
-            .emoji('🫶') // heart hands emoji
-            .label("Favourite".to_string())
-            .style(ButtonStyle::Secondary)
-    });
-
-    ctx.send(|message| {
-        message
-            .components(|c| c.add_action_row(row))
-            .attachment(AttachmentType::Path(&image_path))
-            .embed(|embed| {
-                embed
-                    .colour(0x66ff99)
-                    .author(|author| author.name(author_name))
-                    .title(&parts.name)
-                    .description(format!("**Created:** <t:{now}>"))
-                    .footer(|f| {
-                        f.text(format!(
-                            "{} is worth 0 Dino Bucks!\nHotness Rating: 0.00",
-                            &parts.name
-                        ))
-                    })
-                    .attachment(image_file_name)
-            })
-    })
-    .await?;
+    let author_name = get_name(ctx.author(), &ctx).await;
+    send_dino_embed(ctx, dino_id, &parts.name, &author_name, &image_path, now).await?;
 
     transaction.commit().await?;
 
@@ -220,7 +179,7 @@ async fn collection(ctx: Context<'_>, silent: Option<bool>) -> Result<()> {
         .collect::<Vec<String>>()
         .join(", ");
 
-    let author_name = name(ctx.author(), &ctx).await;
+    let author_name = get_name(ctx.author(), &ctx).await;
 
     ctx.send(|message| {
         message
@@ -251,19 +210,49 @@ async fn collection(ctx: Context<'_>, silent: Option<bool>) -> Result<()> {
 }
 
 #[poise::command(slash_command, guild_only, prefix_command)]
-async fn rename(ctx: Context<'_>, dino_name: String, new_name: String) -> Result<()> {
-    let Some(dino_id) = get_dino_id(&ctx.data().database, &dino_name).await? else {
+async fn rename(ctx: Context<'_>, name: String, replacement: String) -> Result<()> {
+    let Some(dino) = get_dino_record(&ctx.data().database, &name).await? else {
         ephemeral_message(ctx, "The name of the dino you specified was not found.").await?;
         return Ok(());
     };
 
-    if !user_owns_dino(&ctx.data().database, dino_id, &ctx.author().id.to_string()).await? {
+    if dino.owner_id != ctx.author().id.to_string().as_ref() {
         ephemeral_message(ctx, "You don't own this dino, you can't rename it.").await?;
         return Ok(());
     }
 
-    update_dino_name(&ctx.data().database, dino_id, &new_name).await?;
-    ephemeral_message(ctx, format!("Dino name has been update to {new_name}!")).await?;
+    update_dino_name(&ctx.data().database, dino.id, &replacement).await?;
+    ephemeral_message(ctx, format!("Dino name has been update to {replacement}!")).await?;
+
+    Ok(())
+}
+
+#[poise::command(slash_command, guild_only, prefix_command)]
+async fn view(ctx: Context<'_>, name: String) -> Result<()> {
+    let Some(dino) = get_dino_record(&ctx.data().database, &name).await? else {
+        ephemeral_message(ctx, "The name of the dino you specified was not found.").await?;
+        return Ok(());
+    };
+
+    let owner_user_id = UserId::from_str(&dino.owner_id)?;
+    let user_name = match owner_user_id.to_user(&ctx).await {
+        Ok(user) => get_name(&user, &ctx).await,
+        Err(_) => {
+            eprintln!("Could not find user with id: {owner_user_id}. Using a default owner name for this dino.");
+            "unknown user".to_string()
+        }
+    };
+    let image_path = Path::new(OUTPUT_PATH).join(&dino.filename);
+
+    send_dino_embed(
+        ctx,
+        dino.id,
+        &dino.name,
+        &user_name,
+        &image_path,
+        dino.created_at,
+    )
+    .await?;
 
     Ok(())
 }
@@ -435,11 +424,12 @@ async fn insert_dino(
     conn: &mut SqliteConnection,
     user_id: &str,
     parts: &DinoParts,
-    file_name: &str,
+    file_path: &Path,
 ) -> Result<i64> {
     let body = get_file_name(&parts.body);
     let mouth = get_file_name(&parts.mouth);
     let eyes = get_file_name(&parts.eyes);
+    let file_name = get_file_name(file_path);
 
     let row = sqlx::query!(
         r#"INSERT INTO Dino (owner_id, name, filename, created_at, body, mouth, eyes)
@@ -469,8 +459,11 @@ async fn insert_dino(
 }
 
 struct DinoRecord {
+    id: i64,
+    owner_id: String,
     name: String,
     filename: String,
+    created_at: NaiveDateTime,
 }
 
 struct DinoCollection {
@@ -483,7 +476,10 @@ async fn fetch_collection(db: &SqlitePool, user_id: &str) -> Result<DinoCollecti
     let rows = sqlx::query_as!(
         DinoRecord,
         r#"INSERT OR IGNORE INTO DinoUser (id) VALUES (?);
-        SELECT name, filename FROM Dino WHERE owner_id = ? LIMIT 25"#,
+        SELECT id, owner_id, name, filename, created_at
+        FROM Dino
+        WHERE owner_id = ?
+        LIMIT 25"#,
         user_id,
         user_id
     )
@@ -510,30 +506,76 @@ async fn fetch_collection(db: &SqlitePool, user_id: &str) -> Result<DinoCollecti
     })
 }
 
-async fn get_dino_id(db: &SqlitePool, dino_name: &str) -> Result<Option<i64>> {
-    let row = sqlx::query!("SELECT id FROM Dino WHERE name = ?", dino_name)
-        .fetch_optional(db)
-        .await?;
-
-    Ok(row.map(|r| r.id))
-}
-
-async fn user_owns_dino(db: &SqlitePool, dino_id: i64, user_id: &str) -> Result<bool> {
-    let row = sqlx::query!(
-        "SELECT id FROM Dino WHERE id = ? AND owner_id = ?",
-        dino_id,
-        user_id
+async fn get_dino_record(db: &SqlitePool, dino_name: &str) -> Result<Option<DinoRecord>> {
+    let row = sqlx::query_as!(
+        DinoRecord,
+        "SELECT id, owner_id, name, filename, created_at FROM Dino WHERE name = ?",
+        dino_name
     )
     .fetch_optional(db)
     .await?;
 
-    Ok(row.is_some())
+    Ok(row)
 }
 
 async fn update_dino_name(db: &SqlitePool, dino_id: i64, new_name: &str) -> Result<()> {
     sqlx::query!("UPDATE Dino SET name = ? WHERE id = ?", new_name, dino_id)
         .execute(db)
         .await?;
+
+    Ok(())
+}
+
+async fn send_dino_embed(
+    ctx: Context<'_>,
+    dino_id: i64,
+    dino_name: &str,
+    owner_name: &str,
+    image_path: &Path,
+    created_at: NaiveDateTime,
+) -> Result<()> {
+    let mut row = CreateActionRow::default();
+    row.create_button(|b| {
+        b.custom_id(format!("{COVET_BUTTON}:{dino_id}"))
+            .emoji('👍')
+            .label("Covet".to_string())
+            .style(ButtonStyle::Success)
+    });
+    row.create_button(|b| {
+        b.custom_id(format!("{SHUN_BUTTON}:{dino_id}"))
+            .emoji('👎')
+            .label("Shun".to_string())
+            .style(ButtonStyle::Danger)
+    });
+    row.create_button(|b| {
+        b.custom_id(format!("{FAVOURITE_BUTTON}:{dino_id}"))
+            .emoji('🫶') // heart hands emoji
+            .label("Favourite".to_string())
+            .style(ButtonStyle::Secondary)
+    });
+
+    let image_name = get_file_name(image_path);
+
+    ctx.send(|message| {
+        message
+            .components(|c| c.add_action_row(row))
+            .attachment(AttachmentType::Path(image_path))
+            .embed(|embed| {
+                embed
+                    .colour(0x66ff99)
+                    .author(|author| author.name(owner_name))
+                    .title(dino_name)
+                    .description(format!("**Created:** <t:{}>", created_at.timestamp()))
+                    .footer(|f| {
+                        f.text(format!(
+                            "{} is worth 0 Dino Bucks!\nHotness Rating: 0.00",
+                            &dino_name
+                        ))
+                    })
+                    .attachment(image_name)
+            })
+    })
+    .await?;
 
     Ok(())
 }
