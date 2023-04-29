@@ -167,9 +167,9 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     });
     row.create_button(|b| {
         b.custom_id(format!("{FAVOURITE_BUTTON}:{dino_id}"))
-            .emoji('♥')
+            .emoji('🫶') // heart hands emoji
             .label("Favourite".to_string())
-            .style(ButtonStyle::Primary)
+            .style(ButtonStyle::Secondary)
     });
 
     ctx.send(|message| {
