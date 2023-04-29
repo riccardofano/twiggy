@@ -203,16 +203,18 @@ async fn collection(ctx: Context<'_>, silent: Option<bool>) -> Result<()> {
     let silent = silent.unwrap_or(true);
 
     let db = &ctx.data().database;
-    let (total, dinos) = fetch_collection(db, &ctx.author().id.to_string()).await?;
+    let dino_collection = fetch_collection(db, &ctx.author().id.to_string()).await?;
 
-    if dinos.is_empty() {
+    if dino_collection.dinos.is_empty() {
         ephemeral_message(ctx, "You don't have any dinos :'(").await?;
         return Ok(());
     }
 
-    let image = generate_dino_collection_image(&dinos)?;
+    let image = generate_dino_collection_image(&dino_collection.dinos)?;
     let filename = format!("{}_collection.png", ctx.author().name);
-    let dino_names = dinos
+    let others_count = dino_collection.dino_count - dino_collection.dinos.len() as i32;
+    let dino_names = dino_collection
+        .dinos
         .into_iter()
         .map(|d| d.name)
         .collect::<Vec<String>>()
@@ -228,12 +230,13 @@ async fn collection(ctx: Context<'_>, silent: Option<bool>) -> Result<()> {
                     .author(|author| author.name(&author_name).icon_url(avatar_url(ctx.author())))
                     .title(format!("{}'s collection", &author_name))
                     // TODO: handle case when displayed dinos are less than total
-                    .description(format!(
-                        "{} and {} others!",
-                        &dino_names,
-                        total - dino_names.len() as i32
+                    .description(format!("{} and {} others!", &dino_names, &others_count))
+                    .footer(|f| {
+                        f.text(format!(
+                            "{} Dinos. Together they are worth: {} Bucks",
+                            dino_collection.dino_count, dino_collection.transaction_count
                     ))
-                    .footer(|f| f.text(format!("{total} Dinos")))
+                    })
                     .attachment(&filename)
             })
             .attachment(AttachmentType::Bytes {
@@ -452,7 +455,13 @@ struct DinoRecord {
     filename: String,
 }
 
-async fn fetch_collection(db: &SqlitePool, user_id: &str) -> Result<(i32, Vec<DinoRecord>)> {
+struct DinoCollection {
+    dino_count: i32,
+    transaction_count: i32,
+    dinos: Vec<DinoRecord>,
+}
+
+async fn fetch_collection(db: &SqlitePool, user_id: &str) -> Result<DinoCollection> {
     let rows = sqlx::query_as!(
         DinoRecord,
         r#"INSERT OR IGNORE INTO DinoUser (id) VALUES (?);
@@ -464,12 +473,21 @@ async fn fetch_collection(db: &SqlitePool, user_id: &str) -> Result<(i32, Vec<Di
     .await?;
 
     // FIXME: there's probably a better way to get this but this will do for now
-    let total_count = sqlx::query!(
-        "SELECT COUNT(*) as total FROM Dino WHERE owner_id = ?",
+    let row = sqlx::query!(
+        r#"SELECT COUNT(*) as dino_count,
+        TOTAL(
+            (SELECT COUNT(*) FROM DinoTransactions WHERE dino_id = Dino.id)
+        ) as trans_count
+        FROM Dino
+        WHERE owner_id = ?"#,
         user_id
     )
     .fetch_one(db)
     .await?;
 
-    Ok((total_count.total, rows))
+    Ok(DinoCollection {
+        dino_count: row.dino_count,
+        transaction_count: row.trans_count.unwrap_or(0.0) as i32,
+        dinos: rows,
+    })
 }
