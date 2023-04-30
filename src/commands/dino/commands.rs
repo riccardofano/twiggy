@@ -8,7 +8,7 @@ use std::{
 
 use chrono::{NaiveDateTime, Utc};
 use image::{imageops::overlay, io::Reader, ImageBuffer, ImageOutputFormat, RgbaImage};
-use poise::serenity_prelude::{AttachmentType, ButtonStyle, CreateActionRow, UserId};
+use poise::serenity_prelude::{AttachmentType, ButtonStyle, CreateActionRow, User, UserId};
 use rand::{seq::SliceRandom, thread_rng};
 use sqlx::{Acquire, SqliteConnection, SqlitePool};
 use tokio::sync::{RwLock, RwLockReadGuard};
@@ -77,7 +77,7 @@ fn setup_dinos() -> RwLock<Fragments> {
 #[poise::command(
     slash_command,
     guild_only,
-    subcommands("hatch", "collection", "rename", "view"),
+    subcommands("hatch", "collection", "rename", "view", "gift"),
     custom_data = "setup_dinos()"
 )]
 pub async fn dino(_ctx: Context<'_>) -> Result<()> {
@@ -194,7 +194,7 @@ async fn collection(ctx: Context<'_>, silent: Option<bool>) -> Result<()> {
                         f.text(format!(
                             "{} Dinos. Together they are worth: {} Bucks",
                             dino_collection.dino_count, dino_collection.transaction_count
-                    ))
+                        ))
                     })
                     .attachment(&filename)
             })
@@ -252,6 +252,38 @@ async fn view(ctx: Context<'_>, name: String) -> Result<()> {
         &image_path,
         dino.created_at,
     )
+    .await?;
+
+    Ok(())
+}
+
+#[poise::command(guild_only, slash_command, prefix_command)]
+async fn gift(ctx: Context<'_>, dino: String, recipient: User) -> Result<()> {
+    let Some(dino_record) = get_dino_record(&ctx.data().database, &dino).await? else {
+        ephemeral_message(ctx, format!( "Could not find a dino named {dino}.")).await?;
+        return Ok(());
+    };
+
+    if dino_record.owner_id != ctx.author().id.to_string().as_ref() {
+        ephemeral_message(ctx, "You cannot gift a dino you don't own.").await?;
+        return Ok(());
+    }
+
+    // TODO: check and update gifting cooldown
+    gift_dino(
+        &ctx.data().database,
+        dino_record.id,
+        &ctx.author().id.to_string(),
+        &recipient.id.to_string(),
+    )
+    .await?;
+
+    ctx.say(&format!(
+        "**{}** gifted {} to **{}**! How kind!",
+        get_name(ctx.author(), &ctx).await,
+        dino,
+        get_name(&recipient, &ctx).await
+    ))
     .await?;
 
     Ok(())
@@ -575,6 +607,30 @@ async fn send_dino_embed(
                     .attachment(image_name)
             })
     })
+    .await?;
+
+    Ok(())
+}
+
+async fn gift_dino(
+    db: &SqlitePool,
+    dino_id: i64,
+    gifter_id: &str,
+    recipient_id: &str,
+) -> Result<()> {
+    sqlx::query!(
+        r#"INSERT OR IGNORE INTO DinoUser (id) VALUES (?);
+        INSERT INTO DinoTransactions (dino_id, user_id, gifter_id, type)
+        VALUES (?, ?, ?, 'GIFT');
+        UPDATE Dino SET owner_id = ? WHERE id = ?"#,
+        recipient_id,
+        dino_id,
+        recipient_id,
+        gifter_id,
+        recipient_id,
+        dino_id,
+    )
+    .execute(db)
     .await?;
 
     Ok(())
