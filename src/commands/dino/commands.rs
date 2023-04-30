@@ -9,7 +9,7 @@ use chrono::{NaiveDateTime, Utc};
 use image::{imageops::overlay, io::Reader, ImageBuffer, ImageOutputFormat, RgbaImage};
 use poise::serenity_prelude::{AttachmentType, ButtonStyle, CreateActionRow, User, UserId};
 use rand::{seq::SliceRandom, thread_rng};
-use sqlx::{error::DatabaseError, sqlite::SqliteError, SqliteConnection, SqlitePool};
+use sqlx::{error::DatabaseError, sqlite::SqliteError, QueryBuilder, SqliteConnection, SqlitePool};
 use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::{
@@ -87,8 +87,8 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     let midnight_utc = now.date().and_hms_opt(0, 0, 0).unwrap();
     let midnight_utc_tomorrow = midnight_utc + chrono::Duration::days(1);
 
-    let hatcher_record =
-        get_user_record(&ctx.data().database, &ctx.author().id.to_string()).await?;
+    let author_id = ctx.author().id.to_string();
+    let hatcher_record = get_user_record(&ctx.data().database, &author_id).await?;
 
     if hatcher_record.last_hatch > midnight_utc {
         ephemeral_message(
@@ -106,7 +106,14 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     // TODO: give twitch subs a reroll
 
     if hatch_roll <= (MAX_FAILED_HATCHES - hatcher_record.consecutive_fails) {
-        update_failed_hatches(&ctx.data().database, ctx.author().id.to_string()).await?;
+        let mut conn = ctx.data().database.acquire().await?;
+
+        update_last_user_action(
+            &mut conn,
+            &author_id,
+            UserAction::Hatch(hatcher_record.consecutive_fails + 1),
+        )
+        .await?;
 
         ctx.say(format!(
             "You failed to hatch the egg ({} attempt), \
@@ -141,13 +148,8 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
 
     let mut transaction = ctx.data().database.begin().await?;
 
-    let dino_id = insert_dino(
-        &mut transaction,
-        &ctx.author().id.to_string(),
-        &parts,
-        &image_path,
-    )
-    .await?;
+    let dino_id = insert_dino(&mut transaction, &author_id, &parts, &image_path).await?;
+    update_last_user_action(&mut transaction, &author_id, UserAction::Hatch(0)).await?;
 
     let author_name = get_name(ctx.author(), &ctx).await;
     send_dino_embed(ctx, dino_id, &parts.name, &author_name, &image_path, now).await?;
@@ -374,13 +376,36 @@ async fn slurp(ctx: Context<'_>, first: String, second: String) -> Result<()> {
     Ok(())
 }
 
-async fn update_failed_hatches(db: &SqlitePool, user_id: String) -> Result<()> {
-    sqlx::query!(
-        "UPDATE DinoUser SET last_hatch = datetime('now'), consecutive_fails = consecutive_fails + 1 WHERE id = ?",
-        user_id
-    )
-    .execute(db)
-    .await?;
+enum UserAction {
+    Hatch(i64),
+    Slurp,
+    Gift,
+}
+
+impl UserAction {
+    fn to_update_query(&self) -> String {
+        match self {
+            UserAction::Hatch(consecutive_fails) => {
+                format!("last_hatch = datetime('now'), consecutive_fails = {consecutive_fails}")
+            }
+            UserAction::Slurp => "last_slurp = datetime('now)".to_string(),
+            UserAction::Gift => "last_gifting = datetime('now')".to_string(),
+        }
+    }
+}
+
+async fn update_last_user_action(
+    conn: &mut SqliteConnection,
+    user_id: &str,
+    action: UserAction,
+) -> Result<()> {
+    let mut query = QueryBuilder::new(format!(
+        "UPDATE DinoUser SET {} WHERE id = ",
+        action.to_update_query()
+    ));
+    query.push_bind(user_id);
+
+    query.build().execute(conn).await?;
 
     Ok(())
 }
@@ -563,10 +588,7 @@ async fn insert_dino(
     .await?;
 
     sqlx::query!(
-        r#"INSERT INTO DinoTransactions (dino_id, user_id, type) VALUES (?, ?, 'HATCH');
-        UPDATE DinoUser SET last_hatch = datetime('now'), consecutive_fails = 0 WHERE id = ?"#,
-        row.id,
-        user_id,
+        r#"UPDATE DinoUser SET last_hatch = datetime('now'), consecutive_fails = 0 WHERE id = ?"#,
         user_id
     )
     .execute(&mut *conn)
