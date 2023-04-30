@@ -3,7 +3,6 @@ use std::{
     io::Cursor,
     path::{Path, PathBuf},
     str::FromStr,
-    time::Duration,
 };
 
 use chrono::{NaiveDateTime, Utc};
@@ -48,8 +47,6 @@ pub const COVET_BUTTON: &str = "dino-covet";
 pub const SHUN_BUTTON: &str = "dino-shun";
 pub const FAVOURITE_BUTTON: &str = "dino-favourite";
 
-const HATCH_COOLDOWN: Duration = Duration::from_secs(10);
-
 fn setup_dinos() -> RwLock<Fragments> {
     let fragments_dir = fs::read_dir(FRAGMENT_PATH).expect("Could not read fragment path");
 
@@ -87,13 +84,21 @@ pub async fn dino(_ctx: Context<'_>) -> Result<()> {
 #[poise::command(slash_command, guild_only)]
 async fn hatch(ctx: Context<'_>) -> Result<()> {
     let now = Utc::now().naive_utc();
-    let hatch_cooldown_duration = chrono::Duration::from_std(HATCH_COOLDOWN)?;
+    let midnight_utc = now.date().and_hms_opt(0, 0, 0).unwrap();
+    let midnight_utc_tomorrow = midnight_utc + chrono::Duration::days(1);
 
     let hatcher_record =
         get_user_record(&ctx.data().database, &ctx.author().id.to_string()).await?;
-    if hatcher_record.last_hatch + hatch_cooldown_duration > now {
-        // TODO: better message
-        ephemeral_message(ctx, "Can't hatch yet").await?;
+
+    if hatcher_record.last_hatch > midnight_utc {
+        ephemeral_message(
+            ctx,
+            format!(
+                "Dont be greedy! You can hatch again <t:{}:R>.",
+                midnight_utc_tomorrow.timestamp()
+            ),
+        )
+        .await?;
         return Ok(());
     }
 
@@ -103,15 +108,11 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     if hatch_roll <= (MAX_FAILED_HATCHES - hatcher_record.consecutive_fails) {
         update_failed_hatches(&ctx.data().database, ctx.author().id.to_string()).await?;
 
-        let midnight_utc = (now + chrono::Duration::days(1))
-            .date()
-            .and_hms_opt(0, 0, 0)
-            .unwrap();
         ctx.say(format!(
             "You failed to hatch the egg ({} attempt), \
             better luck next time. You can try again <t:{}:R>",
             HATCH_FAILS_TEXT[hatcher_record.consecutive_fails as usize],
-            midnight_utc.timestamp()
+            midnight_utc_tomorrow.timestamp()
         ))
         .await?;
 
@@ -223,7 +224,7 @@ async fn rename(ctx: Context<'_>, name: String, replacement: String) -> Result<(
 
     if let Err(e) = update_dino_name(&ctx.data().database, dino.id, &replacement).await {
         if let Some(sqlite_error) = e.downcast_ref::<SqliteError>() {
-            // NOTE: 2067 is the code for a UNIQUE contraint error in Sqlite
+            // NOTE: 2067 is the code for a UNIQUE constraint error in Sqlite
             // https://www.sqlite.org/rescode.html#constraint_unique
             if sqlite_error.code() == Some("2067".into()) {
                 ephemeral_message(ctx, "This name is already taken!").await?;
@@ -302,7 +303,7 @@ async fn gift(ctx: Context<'_>, dino: String, recipient: User) -> Result<()> {
 
 async fn update_failed_hatches(db: &SqlitePool, user_id: String) -> Result<()> {
     sqlx::query!(
-        "UPDATE DinoUser SET consecutive_fails = consecutive_fails + 1 WHERE id = ?",
+        "UPDATE DinoUser SET last_hatch = datetime('now'), consecutive_fails = consecutive_fails + 1 WHERE id = ?",
         user_id
     )
     .execute(db)
