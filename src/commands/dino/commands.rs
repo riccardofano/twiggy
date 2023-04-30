@@ -10,7 +10,7 @@ use chrono::{NaiveDateTime, Utc};
 use image::{imageops::overlay, io::Reader, ImageBuffer, ImageOutputFormat, RgbaImage};
 use poise::serenity_prelude::{AttachmentType, ButtonStyle, CreateActionRow, User, UserId};
 use rand::{seq::SliceRandom, thread_rng};
-use sqlx::{Acquire, SqliteConnection, SqlitePool};
+use sqlx::{error::DatabaseError, sqlite::SqliteError, Acquire, SqliteConnection, SqlitePool};
 use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::{
@@ -221,7 +221,18 @@ async fn rename(ctx: Context<'_>, name: String, replacement: String) -> Result<(
         return Ok(());
     }
 
-    update_dino_name(&ctx.data().database, dino.id, &replacement).await?;
+    if let Err(e) = update_dino_name(&ctx.data().database, dino.id, &replacement).await {
+        if let Some(sqlite_error) = e.downcast_ref::<SqliteError>() {
+            // NOTE: 2067 is the code for a UNIQUE contraint error in Sqlite
+            // https://www.sqlite.org/rescode.html#constraint_unique
+            if sqlite_error.code() == Some("2067".into()) {
+                ephemeral_message(ctx, "This name is already taken!").await?;
+                return Ok(());
+            }
+        };
+        return Err(e);
+    }
+
     ephemeral_message(ctx, format!("Dino name has been update to {replacement}!")).await?;
 
     Ok(())
@@ -551,9 +562,13 @@ async fn get_dino_record(db: &SqlitePool, dino_name: &str) -> Result<Option<Dino
 }
 
 async fn update_dino_name(db: &SqlitePool, dino_id: i64, new_name: &str) -> Result<()> {
-    sqlx::query!("UPDATE Dino SET name = ? WHERE id = ?", new_name, dino_id)
-        .execute(db)
-        .await?;
+    sqlx::query!(
+        "UPDATE OR ABORT Dino SET name = ? WHERE id = ?",
+        new_name,
+        dino_id
+    )
+    .execute(db)
+    .await?;
 
     Ok(())
 }

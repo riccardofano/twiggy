@@ -1,8 +1,8 @@
 CREATE TABLE Dino (
     id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     owner_id TEXT NOT NULL REFERENCES DinoUser(id),
-    name TEXT NOT NULL,
-    filename TEXT NOT NULL,
+    name TEXT NOT NULL UNIQUE,
+    filename TEXT NOT NULL UNIQUE,
     created_at DATETIME NOT NULL,
 
     body TEXT NOT NULL,
