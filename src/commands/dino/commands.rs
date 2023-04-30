@@ -9,7 +9,7 @@ use chrono::{NaiveDateTime, Utc};
 use image::{imageops::overlay, io::Reader, ImageBuffer, ImageOutputFormat, RgbaImage};
 use poise::serenity_prelude::{AttachmentType, ButtonStyle, CreateActionRow, User, UserId};
 use rand::{seq::SliceRandom, thread_rng};
-use sqlx::{error::DatabaseError, sqlite::SqliteError, Acquire, SqliteConnection, SqlitePool};
+use sqlx::{error::DatabaseError, sqlite::SqliteError, SqliteConnection, SqlitePool};
 use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::{
@@ -74,7 +74,7 @@ fn setup_dinos() -> RwLock<Fragments> {
 #[poise::command(
     slash_command,
     guild_only,
-    subcommands("hatch", "collection", "rename", "view", "gift"),
+    subcommands("hatch", "collection", "rename", "view", "gift", "slurp"),
     custom_data = "setup_dinos()"
 )]
 pub async fn dino(_ctx: Context<'_>) -> Result<()> {
@@ -139,8 +139,7 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     let parts = parts.unwrap();
     let image_path = generate_dino_image(&parts)?;
 
-    let mut conn = ctx.data().database.acquire().await?;
-    let mut transaction = conn.begin().await?;
+    let mut transaction = ctx.data().database.begin().await?;
 
     let dino_id = insert_dino(
         &mut transaction,
@@ -297,6 +296,80 @@ async fn gift(ctx: Context<'_>, dino: String, recipient: User) -> Result<()> {
         get_name(&recipient, &ctx).await
     ))
     .await?;
+
+    Ok(())
+}
+
+/// Sacrifice two dinos to create a new one
+#[poise::command(guild_only, slash_command, prefix_command)]
+async fn slurp(ctx: Context<'_>, first: String, second: String) -> Result<()> {
+    let Some(first_dino) = get_dino_record(&ctx.data().database, &first).await? else {
+        ephemeral_message(ctx, &format!("Could not find a dino named {first}.")).await?;
+        return Ok(());
+    };
+
+    let author_id = ctx.author().id.to_string();
+
+    if first_dino.owner_id != author_id {
+        ephemeral_message(
+            ctx,
+            &format!("Doesn't seem you own {first}, are you trying to pull a fast one on me?!"),
+        )
+        .await?;
+        return Ok(());
+    }
+
+    let Some(second_dino) = get_dino_record(&ctx.data().database, &second).await? else {
+        ephemeral_message(ctx, &format!("Could not find a dino named {second}.")).await?;
+        return Ok(());
+    };
+
+    if second_dino.owner_id != author_id {
+        ephemeral_message(
+            ctx,
+            &format!("Doesn't seem you own {second}, are you trying to pull a fast one on me?!"),
+        )
+        .await?;
+        return Ok(());
+    }
+    let custom_data_lock = ctx.parent_commands()[0]
+        .custom_data
+        .downcast_ref::<RwLock<Fragments>>()
+        .expect("Expected to have passed a Fragments struct as custom_data");
+
+    let fragments = custom_data_lock.read().await;
+    let parts = generate_dino(&ctx.data().database, fragments).await?;
+
+    if parts.is_none() {
+        ephemeral_message(
+            ctx,
+            "I tried really hard but i wasn't able to make a unique dino for you. Sorry... :'(",
+        )
+        .await?;
+        return Ok(());
+    }
+
+    let mut transaction = ctx.data().database.begin().await?;
+    delete_dino(&mut transaction, first_dino.id).await?;
+    delete_dino(&mut transaction, second_dino.id).await?;
+
+    let parts = parts.unwrap();
+    let image_path = generate_dino_image(&parts)?;
+
+    let dino_id = insert_dino(&mut transaction, &author_id, &parts, &image_path).await?;
+
+    let author_name = get_name(ctx.author(), &ctx).await;
+    send_dino_embed(
+        ctx,
+        dino_id,
+        &parts.name,
+        &author_name,
+        &image_path,
+        Utc::now().naive_utc(),
+    )
+    .await?;
+
+    transaction.commit().await?;
 
     Ok(())
 }
@@ -611,6 +684,7 @@ async fn send_dino_embed(
             .embed(|embed| {
                 embed
                     .colour(0x66ff99)
+                    // TODO: add avatar
                     .author(|author| author.name(owner_name))
                     .title(dino_name)
                     .description(format!("**Created:** <t:{}>", created_at.timestamp()))
@@ -648,6 +722,14 @@ async fn gift_dino(
     )
     .execute(db)
     .await?;
+
+    Ok(())
+}
+
+async fn delete_dino(conn: &mut SqliteConnection, dino_id: i64) -> Result<()> {
+    sqlx::query!("DELETE FROM Dino WHERE id = ?", dino_id)
+        .execute(&mut *conn)
+        .await?;
 
     Ok(())
 }
