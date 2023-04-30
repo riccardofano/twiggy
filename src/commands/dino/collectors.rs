@@ -64,21 +64,28 @@ async fn handle_dino_collector(
     interaction: &MessageComponentInteraction,
 ) -> Result<()> {
     let custom_id = &interaction.data.custom_id;
-    let dino_id = custom_id.split(':').collect::<Vec<_>>();
-    let dino_id = dino_id.get(1);
+    let split_btn_id = custom_id.split(':').collect::<Vec<_>>();
+    let dino_id = split_btn_id.get(1);
 
-    if dino_id.is_none() {
+    let Some(dino_id) = dino_id else {
         interaction
             .create_interaction_response(&ctx, |r| {
-                r.interaction_response_data(|d| d.content("Could not find dino id").ephemeral(true))
+                r.interaction_response_data(|d| d.content("Could not find a dino id.").ephemeral(true))
             })
             .await?;
         return Ok(());
-    }
+    };
 
-    let dino_id = dino_id.unwrap();
-    let mut conn = user_data.database.acquire().await?;
-    let mut transaction = conn.begin().await?;
+    let Ok(dino_id) = dino_id.parse::<i64>() else {
+        interaction
+            .create_interaction_response(&ctx, |r| {
+                r.interaction_response_data(|d| d.content("Dino id is not valid.").ephemeral(true))
+            })
+            .await?;
+        return Ok(());
+    };
+
+    let mut transaction = user_data.database.begin().await?;
     let dino = fetch_dino_names(&mut transaction, dino_id).await?;
 
     if dino.is_none() {
@@ -153,7 +160,7 @@ async fn handle_dino_collector(
 async fn handle_button_press(
     interaction: &MessageComponentInteraction,
     conn: &mut SqliteConnection,
-    dino_id: &str,
+    dino_id: i64,
     button_type: TransactionType,
 ) -> Result<Option<String>> {
     let user_id = interaction.user.id.to_string();
@@ -191,7 +198,7 @@ async fn handle_button_press(
 async fn fetch_transaction(
     conn: &mut SqliteConnection,
     user_id: &str,
-    dino_id: &str,
+    dino_id: i64,
     transaction_type: &TransactionType,
 ) -> Result<Option<i64>> {
     let transaction_type = transaction_type.to_string();
@@ -220,7 +227,7 @@ async fn delete_transaction(conn: &mut SqliteConnection, transaction_id: i64) ->
 async fn create_transaction(
     conn: &mut SqliteConnection,
     user_id: &str,
-    dino_id: &str,
+    dino_id: i64,
     transaction_type: &TransactionType,
 ) -> Result<()> {
     let transaction_type = transaction_type.to_string();
@@ -236,7 +243,7 @@ async fn create_transaction(
     Ok(())
 }
 
-async fn calculate_dino_score(conn: &mut SqliteConnection, dino_id: &str) -> Result<(i64, i64)> {
+async fn calculate_dino_score(conn: &mut SqliteConnection, dino_id: i64) -> Result<(i64, i64)> {
     let row = sqlx::query!(
         r#"SELECT COUNT(id) as count, type as type_ FROM DinoTransactions WHERE dino_id = ? GROUP BY type"#,
         dino_id
@@ -258,16 +265,11 @@ async fn calculate_dino_score(conn: &mut SqliteConnection, dino_id: &str) -> Res
 
 async fn fetch_dino_names(
     conn: &mut SqliteConnection,
-    dino_id: &str,
+    dino_id: i64,
 ) -> Result<Option<(String, String)>> {
     let row = sqlx::query!("SELECT name, filename FROM Dino WHERE id = ?", dino_id)
         .fetch_optional(&mut *conn)
         .await?;
 
-    match row {
-        Some(row) => Ok(Some((row.name, row.filename))),
-        // TODO: maybe we should recover gracefully and send a message saying
-        // this dino doesn't exist anymore and remove the buttons.
-        None => Ok(None),
-    }
+    Ok(row.map(|r| (r.name, r.filename)))
 }
