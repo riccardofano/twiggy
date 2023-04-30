@@ -4,7 +4,7 @@ use std::fmt::Display;
 use poise::futures_util::StreamExt;
 use poise::serenity_prelude::{self as serenity, MessageComponentInteraction};
 use poise::serenity_prelude::{ComponentInteractionCollectorBuilder, CreateEmbed};
-use sqlx::{Acquire, SqliteConnection};
+use sqlx::SqliteConnection;
 
 use crate::commands::dino::{COVET_BUTTON, FAVOURITE_BUTTON, SHUN_BUTTON};
 use crate::Data;
@@ -259,8 +259,27 @@ async fn calculate_dino_score(conn: &mut SqliteConnection, dino_id: i64) -> Resu
     }
 
     let hotness = map.get("COVET").unwrap_or(&0) - map.get("SHUN").unwrap_or(&0);
+    update_dino_score(conn, dino_id, total_transactions, hotness).await?;
 
     Ok((total_transactions, hotness))
+}
+
+async fn update_dino_score(
+    conn: &mut SqliteConnection,
+    dino_id: i64,
+    worth: i64,
+    hotness: i64,
+) -> Result<()> {
+    sqlx::query!(
+        "UPDATE Dino SET worth = ?, hotness = ? WHERE id = ?",
+        worth,
+        hotness,
+        dino_id
+    )
+    .execute(&mut *conn)
+    .await?;
+
+    Ok(())
 }
 
 async fn fetch_dino_names(

@@ -5,6 +5,9 @@ CREATE TABLE Dino (
     filename TEXT NOT NULL UNIQUE,
     created_at DATETIME NOT NULL,
 
+    worth INTEGER NOT NULL DEFAULT 1,
+    hotness INTEGER NOT NULL DEFAULT 0,
+
     body TEXT NOT NULL,
     mouth TEXT NOT NULL,
     eyes TEXT NOT NULL,
