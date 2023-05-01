@@ -627,13 +627,6 @@ async fn insert_dino(
     .fetch_one(&mut *conn)
     .await?;
 
-    sqlx::query!(
-        r#"UPDATE DinoUser SET last_hatch = datetime('now'), consecutive_fails = 0 WHERE id = ?"#,
-        user_id
-    )
-    .execute(&mut *conn)
-    .await?;
-
     Ok(row.id)
 }
 
