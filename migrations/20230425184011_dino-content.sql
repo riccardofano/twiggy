@@ -3,6 +3,7 @@ CREATE TABLE Dino (
     owner_id TEXT NOT NULL REFERENCES DinoUser(id),
     name TEXT NOT NULL UNIQUE,
     filename TEXT NOT NULL UNIQUE,
+    hatch_message TEXT NOT NULL DEFAULT '',
     created_at DATETIME NOT NULL,
 
     worth INTEGER NOT NULL DEFAULT 1,

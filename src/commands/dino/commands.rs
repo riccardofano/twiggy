@@ -157,7 +157,9 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     update_last_user_action(&mut transaction, &author_id, UserAction::Hatch(0)).await?;
 
     let author_name = get_name(ctx.author(), &ctx).await;
-    send_dino_embed(ctx, &dino, &author_name, &image_path, now).await?;
+    let message = send_dino_embed(ctx, &dino, &author_name, &image_path, now).await?;
+
+    update_hatch_message(&mut transaction, dino.id, &message).await?;
 
     transaction.commit().await?;
 
@@ -314,12 +316,21 @@ async fn gift(ctx: Context<'_>, dino: String, recipient: User) -> Result<()> {
     .await?;
     update_last_user_action(&mut transaction, &author_id, UserAction::Gift).await?;
 
-    ctx.say(&format!(
-        "**{}** gifted {} to **{}**! How kind!",
-        get_name(ctx.author(), &ctx).await,
-        dino,
-        get_name(&recipient, &ctx).await
-    ))
+    let sender_name = get_name(ctx.author(), &ctx).await;
+    let receiver_name = get_name(&recipient, &ctx).await;
+    let dino_name = if dino_record.hatch_message.is_empty() {
+        dino
+    } else {
+        format!("[{}]({})", dino, dino_record.hatch_message)
+    };
+
+    ctx.send(|message| {
+        message.embed(|embed| {
+            embed.colour(0x990933).description(&format!(
+                "**{sender_name}** gifted {dino_name} to **{receiver_name}**! How kind!",
+            ))
+        })
+    })
     .await?;
 
     transaction.commit().await?;
@@ -652,11 +663,30 @@ async fn insert_dino(
     Ok(row)
 }
 
+async fn update_hatch_message(
+    conn: &mut SqliteConnection,
+    dino_id: i64,
+    message_link: &str,
+) -> Result<()> {
+    // NOTE: sqlx has some issues handling hatch_message being NULL
+    // so I just made it default to an empty string
+    sqlx::query!(
+        "UPDATE Dino SET hatch_message = ? WHERE id = ?",
+        message_link,
+        dino_id
+    )
+    .execute(conn)
+    .await?;
+
+    Ok(())
+}
+
 #[derive(FromRow)]
 struct DinoRecord {
     id: i64,
     owner_id: String,
     name: String,
+    hatch_message: String,
     created_at: NaiveDateTime,
     worth: i64,
     hotness: i64,
@@ -763,7 +793,7 @@ async fn send_dino_embed(
     owner_name: &str,
     image_path: &Path,
     created_at: NaiveDateTime,
-) -> Result<()> {
+) -> Result<String> {
     let mut row = CreateActionRow::default();
     row.create_button(|b| {
         b.custom_id(format!("{COVET_BUTTON}:{}", dino.id))
@@ -786,29 +816,32 @@ async fn send_dino_embed(
 
     let image_name = get_file_name(image_path);
 
-    ctx.send(|message| {
-        message
-            .components(|c| c.add_action_row(row))
-            .attachment(AttachmentType::Path(image_path))
-            .embed(|embed| {
-                embed
-                    .colour(0x66ff99)
-                    // TODO: add avatar
-                    .author(|author| author.name(owner_name))
-                    .title(&dino.name)
-                    .description(format!("**Created:** <t:{}>", created_at.timestamp()))
-                    .footer(|f| {
-                        f.text(format!(
-                            "{} is worth {} Dino Bucks!\nHotness Rating: {}",
-                            &dino.name, dino.worth, dino.hotness
-                        ))
-                    })
-                    .attachment(image_name)
-            })
-    })
-    .await?;
+    let reply_handle = ctx
+        .send(|message| {
+            message
+                .components(|c| c.add_action_row(row))
+                .attachment(AttachmentType::Path(image_path))
+                .embed(|embed| {
+                    embed
+                        .colour(0x66ff99)
+                        // TODO: add avatar
+                        .author(|author| author.name(owner_name))
+                        .title(&dino.name)
+                        .description(format!("**Created:** <t:{}>", created_at.timestamp()))
+                        .footer(|f| {
+                            f.text(format!(
+                                "{} is worth {} Dino Bucks!\nHotness Rating: {}",
+                                &dino.name, dino.worth, dino.hotness
+                            ))
+                        })
+                        .attachment(image_name)
+                })
+        })
+        .await?;
 
-    Ok(())
+    let message_link = reply_handle.message().await?.link();
+
+    Ok(message_link)
 }
 
 async fn gift_dino(
