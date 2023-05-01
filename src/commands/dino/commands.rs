@@ -416,7 +416,7 @@ async fn slurp(ctx: Context<'_>, first: String, second: String) -> Result<()> {
     update_last_user_action(&mut transaction, &author_id, UserAction::Slurp).await?;
 
     let author_name = get_name(ctx.author(), &ctx).await;
-    send_dino_embed(
+    let message = send_dino_embed(
         ctx,
         &dino,
         &author_name,
@@ -424,6 +424,8 @@ async fn slurp(ctx: Context<'_>, first: String, second: String) -> Result<()> {
         Utc::now().naive_utc(),
     )
     .await?;
+
+    update_hatch_message(&mut transaction, dino.id, &message).await?;
 
     transaction.commit().await?;
 
