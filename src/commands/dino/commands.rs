@@ -533,7 +533,19 @@ fn generate_dino_collection_image(collection: &[DinoRecord]) -> Result<Vec<u8>> 
         let x = (i as u32 % columns) * (COLUMN_MARGIN + DINO_IMAGE_SIZE);
         let y = (i as f32 / columns as f32).floor() as u32 * (ROW_MARGIN + DINO_IMAGE_SIZE);
 
-        let dino_image = Reader::open(output_path.join(&dino.filename))?.decode()?;
+        let dino_image_path = output_path.join(&dino.filename);
+
+        if !dino_image_path.exists() {
+            let fragment_path = Path::new(FRAGMENT_PATH);
+            generate_dino_image(&DinoParts {
+                body: fragment_path.join(&dino.body),
+                mouth: fragment_path.join(&dino.mouth),
+                eyes: fragment_path.join(&dino.eyes),
+                name: dino.name.clone(),
+            })?;
+        }
+
+        let dino_image = Reader::open(&dino_image_path)?.decode()?;
         overlay(&mut image, &dino_image, x.into(), y.into());
     }
 
@@ -597,12 +609,19 @@ async fn insert_dino(
     Ok(row.id)
 }
 
+#[allow(dead_code)]
 struct DinoRecord {
     id: i64,
     owner_id: String,
     name: String,
-    filename: String,
     created_at: NaiveDateTime,
+    worth: i64,
+    hotness: i64,
+
+    filename: String,
+    body: String,
+    mouth: String,
+    eyes: String,
 }
 
 struct DinoCollection {
@@ -615,10 +634,7 @@ async fn fetch_collection(db: &SqlitePool, user_id: &str) -> Result<DinoCollecti
     let rows = sqlx::query_as!(
         DinoRecord,
         r#"INSERT OR IGNORE INTO DinoUser (id) VALUES (?);
-        SELECT id, owner_id, name, filename, created_at
-        FROM Dino
-        WHERE owner_id = ?
-        LIMIT 25"#,
+        SELECT * FROM Dino WHERE owner_id = ? LIMIT 25"#,
         user_id,
         user_id
     )
@@ -646,13 +662,9 @@ async fn fetch_collection(db: &SqlitePool, user_id: &str) -> Result<DinoCollecti
 }
 
 async fn get_dino_record(db: &SqlitePool, dino_name: &str) -> Result<Option<DinoRecord>> {
-    let row = sqlx::query_as!(
-        DinoRecord,
-        "SELECT id, owner_id, name, filename, created_at FROM Dino WHERE name = ?",
-        dino_name
-    )
-    .fetch_optional(db)
-    .await?;
+    let row = sqlx::query_as!(DinoRecord, "SELECT * FROM Dino WHERE name = ?", dino_name)
+        .fetch_optional(db)
+        .await?;
 
     Ok(row)
 }
