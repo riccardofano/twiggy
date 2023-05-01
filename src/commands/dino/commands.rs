@@ -153,11 +153,11 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
 
     let mut transaction = ctx.data().database.begin().await?;
 
-    let dino_id = insert_dino(&mut transaction, &author_id, &parts, &image_path).await?;
+    let dino = insert_dino(&mut transaction, &author_id, &parts, &image_path).await?;
     update_last_user_action(&mut transaction, &author_id, UserAction::Hatch(0)).await?;
 
     let author_name = get_name(ctx.author(), &ctx).await;
-    send_dino_embed(ctx, dino_id, &parts.name, &author_name, &image_path, now).await?;
+    send_dino_embed(ctx, &dino, &author_name, &image_path, now).await?;
 
     transaction.commit().await?;
 
@@ -267,15 +267,7 @@ async fn view(ctx: Context<'_>, name: String) -> Result<()> {
     };
     let image_path = Path::new(OUTPUT_PATH).join(&dino.filename);
 
-    send_dino_embed(
-        ctx,
-        dino.id,
-        &dino.name,
-        &user_name,
-        &image_path,
-        dino.created_at,
-    )
-    .await?;
+    send_dino_embed(ctx, &dino, &user_name, &image_path, dino.created_at).await?;
 
     Ok(())
 }
@@ -409,14 +401,13 @@ async fn slurp(ctx: Context<'_>, first: String, second: String) -> Result<()> {
     let parts = parts.unwrap();
     let image_path = generate_dino_image(&parts)?;
 
-    let dino_id = insert_dino(&mut transaction, &author_id, &parts, &image_path).await?;
+    let dino = insert_dino(&mut transaction, &author_id, &parts, &image_path).await?;
     update_last_user_action(&mut transaction, &author_id, UserAction::Slurp).await?;
 
     let author_name = get_name(ctx.author(), &ctx).await;
     send_dino_embed(
         ctx,
-        dino_id,
-        &parts.name,
+        &dino,
         &author_name,
         &image_path,
         Utc::now().naive_utc(),
@@ -440,7 +431,7 @@ impl UserAction {
             UserAction::Hatch(consecutive_fails) => {
                 format!("last_hatch = datetime('now'), consecutive_fails = {consecutive_fails}")
             }
-            UserAction::Slurp => "last_slurp = datetime('now)".to_string(),
+            UserAction::Slurp => "last_slurp = datetime('now')".to_string(),
             UserAction::Gift => "last_gifting = datetime('now')".to_string(),
         }
     }
@@ -633,27 +624,32 @@ async fn insert_dino(
     user_id: &str,
     parts: &DinoParts,
     file_path: &Path,
-) -> Result<i64> {
+) -> Result<DinoRecord> {
     let body = get_file_name(&parts.body);
     let mouth = get_file_name(&parts.mouth);
     let eyes = get_file_name(&parts.eyes);
     let file_name = get_file_name(file_path);
 
-    let row = sqlx::query!(
-        r#"INSERT INTO Dino (owner_id, name, filename, created_at, body, mouth, eyes)
+    // NOTE: `query_as!` mistakenly interprets all string type fields as
+    // nullable strings (when every field is marked NOT NULL), using
+    // `query_as_unchecked!` until that gets fixed.
+    let row = sqlx::query_as_unchecked!(
+        DinoRecord,
+        r#"INSERT INTO Dino
+        (owner_id, name, filename, created_at, body, mouth, eyes)
         VALUES (?, ?, ?, datetime('now'), ?, ?, ?)
-        RETURNING id"#,
+        RETURNING *"#,
         user_id,
         parts.name,
         file_name,
         body,
         mouth,
-        eyes
+        eyes,
     )
-    .fetch_one(&mut *conn)
+    .fetch_one(conn)
     .await?;
 
-    Ok(row.id)
+    Ok(row)
 }
 
 #[derive(FromRow)]
@@ -763,27 +759,26 @@ async fn update_dino_name(db: &SqlitePool, dino_id: i64, new_name: &str) -> Resu
 
 async fn send_dino_embed(
     ctx: Context<'_>,
-    dino_id: i64,
-    dino_name: &str,
+    dino: &DinoRecord,
     owner_name: &str,
     image_path: &Path,
     created_at: NaiveDateTime,
 ) -> Result<()> {
     let mut row = CreateActionRow::default();
     row.create_button(|b| {
-        b.custom_id(format!("{COVET_BUTTON}:{dino_id}"))
+        b.custom_id(format!("{COVET_BUTTON}:{}", dino.id))
             .emoji('👍')
             .label("Covet".to_string())
             .style(ButtonStyle::Success)
     });
     row.create_button(|b| {
-        b.custom_id(format!("{SHUN_BUTTON}:{dino_id}"))
+        b.custom_id(format!("{SHUN_BUTTON}:{}", dino.id))
             .emoji('👎')
             .label("Shun".to_string())
             .style(ButtonStyle::Danger)
     });
     row.create_button(|b| {
-        b.custom_id(format!("{FAVOURITE_BUTTON}:{dino_id}"))
+        b.custom_id(format!("{FAVOURITE_BUTTON}:{}", dino.id))
             .emoji('🫶') // heart hands emoji
             .label("Favourite".to_string())
             .style(ButtonStyle::Secondary)
@@ -800,12 +795,12 @@ async fn send_dino_embed(
                     .colour(0x66ff99)
                     // TODO: add avatar
                     .author(|author| author.name(owner_name))
-                    .title(dino_name)
+                    .title(&dino.name)
                     .description(format!("**Created:** <t:{}>", created_at.timestamp()))
                     .footer(|f| {
                         f.text(format!(
-                            "{} is worth 0 Dino Bucks!\nHotness Rating: 0.00",
-                            &dino_name
+                            "{} is worth {} Dino Bucks!\nHotness Rating: {}",
+                            &dino.name, dino.worth, dino.hotness
                         ))
                     })
                     .attachment(image_name)
