@@ -331,6 +331,24 @@ async fn gift(ctx: Context<'_>, dino: String, recipient: User) -> Result<()> {
 /// Sacrifice two dinos to create a new one
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn slurp(ctx: Context<'_>, first: String, second: String) -> Result<()> {
+    let user_record = get_user_record(&ctx.data().database, &ctx.author().id.to_string()).await?;
+
+    let now = Utc::now().naive_utc();
+    let slurp_cooldown_duration = chrono::Duration::from_std(SLURP_COOLDOWN)?;
+    let time_until_next_slurp = user_record.last_slurp + slurp_cooldown_duration;
+
+    if time_until_next_slurp > now {
+        ephemeral_message(
+            ctx,
+            format!(
+                "Don't be greedy! You can slurp again <t:{}:R>",
+                time_until_next_slurp.timestamp()
+            ),
+        )
+        .await?;
+        return Ok(());
+    }
+
     let Some(first_dino) = get_dino_record(&ctx.data().database, &first).await? else {
         ephemeral_message(ctx, &format!("Could not find a dino named {first}.")).await?;
         return Ok(());
@@ -385,6 +403,7 @@ async fn slurp(ctx: Context<'_>, first: String, second: String) -> Result<()> {
     let image_path = generate_dino_image(&parts)?;
 
     let dino_id = insert_dino(&mut transaction, &author_id, &parts, &image_path).await?;
+    update_last_user_action(&mut transaction, &author_id, UserAction::Slurp).await?;
 
     let author_name = get_name(ctx.author(), &ctx).await;
     send_dino_embed(
