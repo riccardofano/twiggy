@@ -10,7 +10,9 @@ use chrono::{NaiveDateTime, Utc};
 use image::{imageops::overlay, io::Reader, ImageBuffer, ImageOutputFormat, RgbaImage};
 use poise::serenity_prelude::{AttachmentType, ButtonStyle, CreateActionRow, User, UserId};
 use rand::{seq::SliceRandom, thread_rng};
-use sqlx::{error::DatabaseError, sqlite::SqliteError, QueryBuilder, SqliteConnection, SqlitePool};
+use sqlx::error::DatabaseError;
+use sqlx::sqlite::SqliteError;
+use sqlx::{FromRow, QueryBuilder, Row, Sqlite, SqliteConnection, SqlitePool};
 use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::{
@@ -163,11 +165,16 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
 }
 
 #[poise::command(slash_command, guild_only)]
-async fn collection(ctx: Context<'_>, silent: Option<bool>) -> Result<()> {
+async fn collection(
+    ctx: Context<'_>,
+    kind: Option<CollectionKind>,
+    silent: Option<bool>,
+) -> Result<()> {
     let silent = silent.unwrap_or(true);
+    let kind = kind.unwrap_or(CollectionKind::All);
 
     let db = &ctx.data().database;
-    let dino_collection = fetch_collection(db, &ctx.author().id.to_string()).await?;
+    let dino_collection = fetch_collection(db, &ctx.author().id.to_string(), kind).await?;
 
     if dino_collection.dinos.is_empty() {
         ephemeral_message(ctx, "You don't have any dinos :'(").await?;
@@ -176,7 +183,7 @@ async fn collection(ctx: Context<'_>, silent: Option<bool>) -> Result<()> {
 
     let image = generate_dino_collection_image(&dino_collection.dinos)?;
     let filename = format!("{}_collection.png", ctx.author().name);
-    let others_count = dino_collection.dino_count - dino_collection.dinos.len() as i32;
+    let others_count = dino_collection.dino_count - dino_collection.dinos.len() as i64;
     let dino_names = dino_collection
         .dinos
         .into_iter()
@@ -649,7 +656,7 @@ async fn insert_dino(
     Ok(row.id)
 }
 
-#[allow(dead_code)]
+#[derive(FromRow)]
 struct DinoRecord {
     id: i64,
     owner_id: String,
@@ -665,39 +672,72 @@ struct DinoRecord {
 }
 
 struct DinoCollection {
-    dino_count: i32,
-    transaction_count: i32,
+    dino_count: i64,
+    transaction_count: i64,
     dinos: Vec<DinoRecord>,
 }
 
-async fn fetch_collection(db: &SqlitePool, user_id: &str) -> Result<DinoCollection> {
-    let rows = sqlx::query_as!(
-        DinoRecord,
-        r#"INSERT OR IGNORE INTO DinoUser (id) VALUES (?);
-        SELECT * FROM Dino WHERE owner_id = ? LIMIT 25"#,
-        user_id,
-        user_id
-    )
-    .fetch_all(db)
-    .await?;
+#[derive(poise::ChoiceParameter)]
+enum CollectionKind {
+    All,
+    Favourite,
+    Trash,
+}
+
+impl CollectionKind {
+    fn push_to_query<'a>(&self, query: &mut QueryBuilder<'a, Sqlite>, user_id: &'a str) {
+        match self {
+            CollectionKind::All => {
+                query.push("WHERE owner_id = ");
+                query.push_bind(user_id);
+            }
+            CollectionKind::Favourite => {
+                query.push("INNER JOIN DinoTransactions t WHERE owner_id = ");
+                query.push_bind(user_id);
+                query.push("AND Dino.id = t.dino_id AND t.type = 'FAVOURITE'");
+            }
+            CollectionKind::Trash => {
+                query.push("WHERE owner_id = ");
+                query.push_bind(user_id);
+                query.push(
+                    "AND id NOT IN (SELECT dino_id FROM DinoTransactions WHERE type = 'FAVOURITE')",
+                );
+            }
+        };
+    }
+}
+
+async fn fetch_collection(
+    db: &SqlitePool,
+    user_id: &str,
+    kind: CollectionKind,
+) -> Result<DinoCollection> {
+    // NOTE: query gets reset to whatever was passed into new so I initialized
+    // it to an empty string
+    let mut query = QueryBuilder::new("");
+    query.push("INSERT OR IGNORE INTO DinoUser (id) VALUES (");
+    query.push_bind(user_id);
+    query.push(");");
+
+    query.push("SELECT * FROM Dino ");
+    kind.push_to_query(&mut query, user_id);
+    query.push("LIMIT 25");
+
+    let dinos: Vec<DinoRecord> = query.build_query_as().fetch_all(db).await?;
+    query.reset();
 
     // FIXME: there's probably a better way to get this but this will do for now
-    let row = sqlx::query!(
-        r#"SELECT COUNT(*) as dino_count,
-        TOTAL(
-            (SELECT COUNT(*) FROM DinoTransactions WHERE dino_id = Dino.id)
-        ) as trans_count
-        FROM Dino
-        WHERE owner_id = ?"#,
-        user_id
-    )
-    .fetch_one(db)
-    .await?;
+    query.push("SELECT COUNT(*), TOTAL(worth) FROM Dino ");
+    kind.push_to_query(&mut query, user_id);
+
+    let row = query.build().fetch_one(db).await?;
+    let dino_count = row.get(0);
+    let transaction_count: f64 = row.get(1);
 
     Ok(DinoCollection {
-        dino_count: row.dino_count,
-        transaction_count: row.trans_count.unwrap_or(0.0) as i32,
-        dinos: rows,
+        dino_count,
+        transaction_count: transaction_count as i64,
+        dinos,
     })
 }
 
