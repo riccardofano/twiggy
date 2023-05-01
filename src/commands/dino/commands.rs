@@ -87,6 +87,7 @@ pub async fn dino(_ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Attempt to hatch a new dino.
 #[poise::command(slash_command, guild_only)]
 async fn hatch(ctx: Context<'_>) -> Result<()> {
     let now = Utc::now().naive_utc();
@@ -166,11 +167,12 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
+/// View your dino collection.
 #[poise::command(slash_command, guild_only)]
 async fn collection(
     ctx: Context<'_>,
-    kind: Option<CollectionKind>,
-    silent: Option<bool>,
+    #[description = "The type of collection your want to view"] kind: Option<CollectionKind>,
+    #[description = "Whether the message will be shown to everyone or not"] silent: Option<bool>,
 ) -> Result<()> {
     let silent = silent.unwrap_or(true);
     let kind = kind.unwrap_or(CollectionKind::All);
@@ -223,8 +225,13 @@ async fn collection(
     Ok(())
 }
 
+/// Give your dino a better name.
 #[poise::command(slash_command, guild_only, prefix_command)]
-async fn rename(ctx: Context<'_>, name: String, replacement: String) -> Result<()> {
+async fn rename(
+    ctx: Context<'_>,
+    #[description = "The existing name of your dino"] name: String,
+    #[description = "The new name for your dino"] replacement: String,
+) -> Result<()> {
     let Some(dino) = get_dino_record(&ctx.data().database, &name).await? else {
         ephemeral_message(ctx, "The name of the dino you specified was not found.").await?;
         return Ok(());
@@ -252,8 +259,12 @@ async fn rename(ctx: Context<'_>, name: String, replacement: String) -> Result<(
     Ok(())
 }
 
+/// View an existing dino.
 #[poise::command(slash_command, guild_only, prefix_command)]
-async fn view(ctx: Context<'_>, name: String) -> Result<()> {
+async fn view(
+    ctx: Context<'_>,
+    #[description = "The name of the dino"] name: String,
+) -> Result<()> {
     let Some(dino) = get_dino_record(&ctx.data().database, &name).await? else {
         ephemeral_message(ctx, "The name of the dino you specified was not found.").await?;
         return Ok(());
@@ -274,8 +285,13 @@ async fn view(ctx: Context<'_>, name: String) -> Result<()> {
     Ok(())
 }
 
+/// Gift your dino to another chatter. How kind.
 #[poise::command(guild_only, slash_command, prefix_command)]
-async fn gift(ctx: Context<'_>, dino: String, recipient: User) -> Result<()> {
+async fn gift(
+    ctx: Context<'_>,
+    #[description = "The name of the dino you want to give away"] dino: String,
+    #[description = "The person who will recieve the dino"] recipient: User,
+) -> Result<()> {
     let user_record = get_user_record(&ctx.data().database, &ctx.author().id.to_string()).await?;
 
     let now = Utc::now().naive_utc();
@@ -340,7 +356,11 @@ async fn gift(ctx: Context<'_>, dino: String, recipient: User) -> Result<()> {
 
 /// Sacrifice two dinos to create a new one
 #[poise::command(guild_only, slash_command, prefix_command)]
-async fn slurp(ctx: Context<'_>, first: String, second: String) -> Result<()> {
+async fn slurp(
+    ctx: Context<'_>,
+    #[description = "The first dino to be slurped"] first: String,
+    #[description = "The second dino to be slurped"] second: String,
+) -> Result<()> {
     let user_record = get_user_record(&ctx.data().database, &ctx.author().id.to_string()).await?;
 
     let now = Utc::now().naive_utc();
