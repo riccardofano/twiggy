@@ -3,6 +3,7 @@ use std::{
     io::Cursor,
     path::{Path, PathBuf},
     str::FromStr,
+    time::Duration,
 };
 
 use chrono::{NaiveDateTime, Utc};
@@ -42,6 +43,9 @@ const ROW_MARGIN: u32 = 2;
 const MAX_GENERATION_ATTEMPTS: usize = 20;
 const MAX_FAILED_HATCHES: i64 = 3;
 const HATCH_FAILS_TEXT: &[&str; 3] = &["1st", "2nd", "3rd"];
+
+const GIFTING_COOLDOWN: Duration = Duration::from_secs(60 * 60);
+const SLURP_COOLDOWN: Duration = Duration::from_secs(60 * 60);
 
 pub const COVET_BUTTON: &str = "dino-covet";
 pub const SHUN_BUTTON: &str = "dino-shun";
@@ -105,9 +109,8 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     let hatch_roll = pick_best_x_dice_rolls(4, 1, 1, None) as i64;
     // TODO: give twitch subs a reroll
 
+    let mut conn = ctx.data().database.acquire().await?;
     if hatch_roll <= (MAX_FAILED_HATCHES - hatcher_record.consecutive_fails) {
-        let mut conn = ctx.data().database.acquire().await?;
-
         update_last_user_action(
             &mut conn,
             &author_id,
@@ -272,6 +275,24 @@ async fn view(ctx: Context<'_>, name: String) -> Result<()> {
 
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn gift(ctx: Context<'_>, dino: String, recipient: User) -> Result<()> {
+    let user_record = get_user_record(&ctx.data().database, &ctx.author().id.to_string()).await?;
+
+    let now = Utc::now().naive_utc();
+    let gifting_cooldown_duration = chrono::Duration::from_std(GIFTING_COOLDOWN)?;
+    let time_until_next_gift = user_record.last_gifting + gifting_cooldown_duration;
+
+    if time_until_next_gift > now {
+        ephemeral_message(
+            ctx,
+            format!(
+                "You're too kind, you're gifting too often. You can gift again <t:{}:R>",
+                time_until_next_gift.timestamp()
+            ),
+        )
+        .await?;
+        return Ok(());
+    }
+
     let Some(dino_record) = get_dino_record(&ctx.data().database, &dino).await? else {
         ephemeral_message(ctx, format!( "Could not find a dino named {dino}.")).await?;
         return Ok(());
@@ -282,14 +303,17 @@ async fn gift(ctx: Context<'_>, dino: String, recipient: User) -> Result<()> {
         return Ok(());
     }
 
-    // TODO: check and update gifting cooldown
+    let mut transaction = ctx.data().database.begin().await?;
+    let author_id = ctx.author().id.to_string();
+
     gift_dino(
-        &ctx.data().database,
+        &mut transaction,
         dino_record.id,
-        &ctx.author().id.to_string(),
+        &author_id,
         &recipient.id.to_string(),
     )
     .await?;
+    update_last_user_action(&mut transaction, &author_id, UserAction::Gift).await?;
 
     ctx.say(&format!(
         "**{}** gifted {} to **{}**! How kind!",
@@ -298,6 +322,8 @@ async fn gift(ctx: Context<'_>, dino: String, recipient: User) -> Result<()> {
         get_name(&recipient, &ctx).await
     ))
     .await?;
+
+    transaction.commit().await?;
 
     Ok(())
 }
@@ -557,6 +583,8 @@ fn generate_dino_collection_image(collection: &[DinoRecord]) -> Result<Vec<u8>> 
 
 struct UserRecord {
     last_hatch: NaiveDateTime,
+    last_slurp: NaiveDateTime,
+    last_gifting: NaiveDateTime,
     consecutive_fails: i64,
 }
 
@@ -564,7 +592,7 @@ async fn get_user_record(db: &SqlitePool, user_id: &str) -> Result<UserRecord> {
     let row = sqlx::query_as!(
         UserRecord,
         r#"INSERT OR IGNORE INTO DinoUser (id) VALUES (?);
-        SELECT last_hatch, consecutive_fails FROM DinoUser WHERE id = ?"#,
+        SELECT last_hatch, last_slurp, last_gifting, consecutive_fails FROM DinoUser WHERE id = ?"#,
         user_id,
         user_id,
     )
@@ -737,7 +765,7 @@ async fn send_dino_embed(
 }
 
 async fn gift_dino(
-    db: &SqlitePool,
+    conn: &mut SqliteConnection,
     dino_id: i64,
     gifter_id: &str,
     recipient_id: &str,
@@ -754,7 +782,7 @@ async fn gift_dino(
         recipient_id,
         dino_id,
     )
-    .execute(db)
+    .execute(conn)
     .await?;
 
     Ok(())
