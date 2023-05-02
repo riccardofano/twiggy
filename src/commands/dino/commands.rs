@@ -187,6 +187,7 @@ async fn collection(
 
     let image = generate_dino_collection_image(&dino_collection.dinos)?;
     let filename = format!("{}_collection.png", ctx.author().name);
+
     let others_count = dino_collection.dino_count - dino_collection.dinos.len() as i64;
     let dino_names = dino_collection
         .dinos
@@ -194,6 +195,19 @@ async fn collection(
         .map(|d| d.name)
         .collect::<Vec<String>>()
         .join(", ");
+
+    let description = if others_count == 1 {
+        format!("{} and one more!", &dino_names)
+    } else if others_count > 0 {
+        format!("{} and {} others!", &dino_names, &others_count)
+    } else {
+        format!("{dino_names}!")
+    };
+    let dino_count = if dino_collection.dino_count == 1 {
+        "1 Dino".to_string()
+    } else {
+        format!("{} Dinos", dino_collection.dino_count)
+    };
 
     let author_name = get_name(ctx.author(), &ctx).await;
 
@@ -204,12 +218,11 @@ async fn collection(
                     .colour(0xffbf00)
                     .author(|author| author.name(&author_name).icon_url(avatar_url(ctx.author())))
                     .title(format!("{}'s collection", &author_name))
-                    // TODO: handle case when displayed dinos are less than total
-                    .description(format!("{} and {} others!", &dino_names, &others_count))
+                    .description(description)
                     .footer(|f| {
                         f.text(format!(
-                            "{} Dinos. Together they are worth: {} Bucks",
-                            dino_collection.dino_count, dino_collection.transaction_count
+                            "{}. They are worth: {} Bucks",
+                            dino_count, dino_collection.transaction_count
                         ))
                     })
                     .attachment(&filename)
