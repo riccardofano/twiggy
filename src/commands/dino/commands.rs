@@ -171,29 +171,37 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
 #[poise::command(slash_command, guild_only)]
 async fn collection(
     ctx: Context<'_>,
-    #[description = "The type of collection your want to view"] kind: Option<CollectionKind>,
+    #[description = "The user's whose collection you want to view"] user: Option<User>,
+    #[description = "The type of collection you want to view"] kind: Option<CollectionKind>,
     #[description = "Whether the message will be shown to everyone or not"] silent: Option<bool>,
 ) -> Result<()> {
     let silent = silent.unwrap_or(true);
     let kind = kind.unwrap_or(CollectionKind::All);
 
+    let user_is_author = user.is_none();
+    let user = user.unwrap_or_else(|| ctx.author().clone());
+
     let db = &ctx.data().database;
-    let dino_collection = fetch_collection(db, &ctx.author().id.to_string(), kind).await?;
+    let dino_collection = fetch_collection(db, &user.id.to_string(), kind).await?;
 
     if dino_collection.dinos.is_empty() {
-        ephemeral_message(ctx, "You don't have any dinos :'(").await?;
+        let content = match user_is_author {
+            true => "You don't have any dinos :'(".to_string(),
+            false => format!("{} doesn't have any dinos :'(", get_name(&user, &ctx).await),
+        };
+        ephemeral_message(ctx, content).await?;
         return Ok(());
     }
 
     let image = generate_dino_collection_image(&dino_collection.dinos)?;
-    let filename = format!("{}_collection.png", ctx.author().name);
+    let filename = format!("{}_collection.png", user.name);
 
     let others_count = dino_collection.dino_count - dino_collection.dinos.len() as i64;
     let dino_names = dino_collection
         .dinos
-        .into_iter()
-        .map(|d| d.name)
-        .collect::<Vec<String>>()
+        .iter()
+        .map(|d| d.name.as_ref())
+        .collect::<Vec<&str>>()
         .join(", ");
 
     let description = if others_count == 1 {
@@ -209,14 +217,14 @@ async fn collection(
         format!("{} Dinos", dino_collection.dino_count)
     };
 
-    let author_name = get_name(ctx.author(), &ctx).await;
+    let author_name = get_name(&user, &ctx).await;
 
     ctx.send(|message| {
         message
             .embed(|embed| {
                 embed
                     .colour(0xffbf00)
-                    .author(|author| author.name(&author_name).icon_url(avatar_url(ctx.author())))
+                    .author(|author| author.name(&author_name).icon_url(avatar_url(&user)))
                     .title(format!("{}'s collection", &author_name))
                     .description(description)
                     .footer(|f| {
