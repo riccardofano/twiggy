@@ -250,7 +250,9 @@ async fn collection(
 #[poise::command(slash_command, guild_only, prefix_command)]
 async fn rename(
     ctx: Context<'_>,
-    #[description = "The existing name of your dino"] name: String,
+    #[description = "The existing name of your dino"]
+    #[autocomplete = "autocomplete_owned_dinos"]
+    name: String,
     #[description = "The new name for your dino"] replacement: String,
 ) -> Result<()> {
     let Some(dino) = get_dino_record(&ctx.data().database, &name).await? else {
@@ -284,7 +286,9 @@ async fn rename(
 #[poise::command(slash_command, guild_only, prefix_command)]
 async fn view(
     ctx: Context<'_>,
-    #[description = "The name of the dino"] name: String,
+    #[description = "The name of the dino"]
+    #[autocomplete = "autocomplete_all_dinos"]
+    name: String,
 ) -> Result<()> {
     let Some(dino) = get_dino_record(&ctx.data().database, &name).await? else {
         ephemeral_message(ctx, "The name of the dino you specified was not found.").await?;
@@ -310,7 +314,9 @@ async fn view(
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn gift(
     ctx: Context<'_>,
-    #[description = "The name of the dino you want to give away"] dino: String,
+    #[description = "The name of the dino you want to give away"]
+    #[autocomplete = "autocomplete_owned_dinos"]
+    dino: String,
     #[description = "The person who will recieve the dino"] recipient: User,
 ) -> Result<()> {
     let user_record = get_user_record(&ctx.data().database, &ctx.author().id.to_string()).await?;
@@ -379,8 +385,12 @@ async fn gift(
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn slurp(
     ctx: Context<'_>,
-    #[description = "The first dino to be slurped"] first: String,
-    #[description = "The second dino to be slurped"] second: String,
+    #[description = "The first dino to be slurped"]
+    #[autocomplete = "autocomplete_owned_dinos"]
+    first: String,
+    #[description = "The second dino to be slurped"]
+    #[autocomplete = "autocomplete_owned_dinos"]
+    second: String,
 ) -> Result<()> {
     let user_record = get_user_record(&ctx.data().database, &ctx.author().id.to_string()).await?;
 
@@ -917,4 +927,49 @@ async fn delete_dino(conn: &mut SqliteConnection, dino_id: i64) -> Result<()> {
         .await?;
 
     Ok(())
+}
+
+async fn autocomplete_owned_dinos<'a>(
+    ctx: Context<'a>,
+    partial: &'a str,
+) -> impl Iterator<Item = String> + 'a {
+    let owner_id = ctx.author().id.to_string();
+    let partial = format!("%{partial}%");
+
+    let suggestions = match sqlx::query!(
+        "SELECT name FROM Dino WHERE owner_id = ? AND name LIKE ? LIMIT 5",
+        owner_id,
+        partial
+    )
+    .fetch_all(&ctx.data().database)
+    .await
+    {
+        Ok(rows) => rows.into_iter().map(|r| r.name).collect(),
+        Err(e) => {
+            eprintln!("Error while trying to suggest autocomplete for '{partial}': {e}");
+            vec![]
+        }
+    };
+
+    suggestions.into_iter()
+}
+
+async fn autocomplete_all_dinos<'a>(
+    ctx: Context<'a>,
+    partial: &'a str,
+) -> impl Iterator<Item = String> + 'a {
+    let partial = format!("%{partial}%");
+
+    let suggestions = match sqlx::query!("SELECT name FROM Dino WHERE name LIKE ? LIMIT 5", partial)
+        .fetch_all(&ctx.data().database)
+        .await
+    {
+        Ok(rows) => rows.into_iter().map(|r| r.name).collect(),
+        Err(e) => {
+            eprintln!("Error while trying to suggest autocomplete for '{partial}': {e}");
+            vec![]
+        }
+    };
+
+    suggestions.into_iter()
 }
