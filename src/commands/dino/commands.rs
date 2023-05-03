@@ -936,22 +936,19 @@ async fn autocomplete_owned_dinos<'a>(
     let owner_id = ctx.author().id.to_string();
     let partial = format!("%{partial}%");
 
-    let suggestions = match sqlx::query!(
+    let suggestions = sqlx::query!(
         "SELECT name FROM Dino WHERE owner_id = ? AND name LIKE ? LIMIT 5",
         owner_id,
         partial
     )
     .fetch_all(&ctx.data().database)
     .await
-    {
-        Ok(rows) => rows.into_iter().map(|r| r.name).collect(),
-        Err(e) => {
-            eprintln!("Error while trying to suggest autocomplete for '{partial}': {e}");
-            vec![]
-        }
-    };
+    .unwrap_or_else(|e| {
+        eprintln!("Error while trying to suggest autocomplete for '{partial}': {e}");
+        vec![]
+    });
 
-    suggestions.into_iter()
+    suggestions.into_iter().map(|r| r.name)
 }
 
 async fn autocomplete_all_dinos<'a>(
@@ -960,16 +957,13 @@ async fn autocomplete_all_dinos<'a>(
 ) -> impl Iterator<Item = String> + 'a {
     let partial = format!("%{partial}%");
 
-    let suggestions = match sqlx::query!("SELECT name FROM Dino WHERE name LIKE ? LIMIT 5", partial)
+    let suggestions = sqlx::query!("SELECT name FROM Dino WHERE name LIKE ? LIMIT 5", partial)
         .fetch_all(&ctx.data().database)
         .await
-    {
-        Ok(rows) => rows.into_iter().map(|r| r.name).collect(),
-        Err(e) => {
+        .unwrap_or_else(|e| {
             eprintln!("Error while trying to suggest autocomplete for '{partial}': {e}");
             vec![]
-        }
-    };
+        });
 
-    suggestions.into_iter()
+    suggestions.into_iter().map(|r| r.name)
 }
