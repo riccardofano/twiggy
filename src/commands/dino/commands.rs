@@ -277,7 +277,14 @@ async fn rename(
         return Err(e);
     }
 
-    ephemeral_message(ctx, format!("Dino name has been update to {replacement}!")).await?;
+    ephemeral_message(
+        ctx,
+        format!(
+            "**{}** name has been update to **{}**!",
+            dino.name, replacement
+        ),
+    )
+    .await?;
 
     Ok(())
 }
