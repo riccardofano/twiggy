@@ -536,10 +536,19 @@ async fn generate_dino(
     let mut tries = 0;
 
     loop {
-        let generated = choose_parts(&fragments);
-        let is_duplicate = are_parts_duplicate(db, &generated).await?;
+        let mut generated = choose_parts(&fragments);
+        let duplicate_parts = are_parts_duplicate(db, &generated).await?;
 
-        if !is_duplicate {
+        if !duplicate_parts {
+            loop {
+                let duplicate_name = is_name_duplicate(db, &generated).await?;
+                if !duplicate_name {
+                    break;
+                }
+                // NOTE: The Pedr method of getting a username, add an underscore
+                // until it's not duplicated anymore
+                generated.name.push('_');
+            }
             return Ok(Some(generated));
         }
 
@@ -562,6 +571,14 @@ async fn are_parts_duplicate(db: &SqlitePool, parts: &DinoParts) -> Result<bool>
     )
     .fetch_optional(db)
     .await?;
+
+    Ok(row.is_some())
+}
+
+async fn is_name_duplicate(db: &SqlitePool, parts: &DinoParts) -> Result<bool> {
+    let row = sqlx::query!("SELECT id FROM Dino WHERE name = ?", parts.name)
+        .fetch_optional(db)
+        .await?;
 
     Ok(row.is_some())
 }
