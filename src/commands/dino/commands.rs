@@ -392,6 +392,11 @@ async fn slurp(
     #[autocomplete = "autocomplete_owned_dinos"]
     second: String,
 ) -> Result<()> {
+    if first.trim() == second.trim() {
+        ephemeral_message(ctx, "You can't slurp the same dino twice, you cheater!").await?;
+        return Ok(());
+    }
+
     let user_record = get_user_record(&ctx.data().database, &ctx.author().id.to_string()).await?;
 
     let now = Utc::now().naive_utc();
