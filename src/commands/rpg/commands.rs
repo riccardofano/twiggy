@@ -52,19 +52,18 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
     let challenger_nick = nickname(challenger, &ctx).await;
     let challenger_name = challenger_nick.as_deref().unwrap_or(&challenger.name);
 
-    let mut conn = ctx.data().database.acquire().await?;
-    let challenger_stats = match get_character_stats(&mut conn, challenger.id.to_string()).await {
-        Ok(last_loss) => last_loss,
-        Err(e) => {
-            eprintln!(
-                "Could not retrieve last loss of {} - {:?}",
-                challenger.name, e
-            );
-            ephemeral_message(ctx, "Something went wrong when trying to join the fight.").await?;
-            return Ok(());
+    let challenger_stats = {
+        let mut conn = ctx.data().database.acquire().await?;
+        match get_character_stats(&mut conn, challenger.id.to_string()).await {
+            Ok(stats) => stats,
+            Err(e) => {
+                eprintln!("Could not retrieve {}'s last loss: {e:?}", challenger.name);
+                ephemeral_message(ctx, "Something went wrong when trying to join the fight.")
+                    .await?;
+                return Ok(());
+            }
         }
     };
-    drop(conn);
 
     let now = Utc::now().naive_utc();
     let loss_cooldown_duration = chrono::Duration::from_std(LOSS_COOLDOWN)?;
@@ -140,9 +139,10 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         let accepter_nick = nickname(accepter, &ctx).await;
         let accepter_name = accepter_nick.as_deref().unwrap_or(&challenger.name);
 
-        let mut conn = ctx.data().database.acquire().await?;
-        let accepter_stats = get_character_stats(&mut conn, accepter.id.to_string()).await?;
-        drop(conn);
+        let accepter_stats = {
+            let mut conn = ctx.data().database.acquire().await?;
+            get_character_stats(&mut conn, accepter.id.to_string()).await?
+        };
 
         let now = Utc::now().naive_utc();
         if accepter_stats.last_loss + loss_cooldown_duration > now {

@@ -40,23 +40,22 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         return Ok(());
     }
 
-    let mut conn = ctx.data().database.acquire().await?;
-    let challenger_last_loss = match get_last_loss(&mut conn, challenger.id.to_string()).await {
-        Ok(last_loss) => last_loss,
-        Err(e) => {
-            eprintln!(
-                "Could not retrieve last loss of {} - {:?}",
-                challenger.name, e
-            );
-            ephemeral_message(ctx, "Something went wrong when trying to join the duel.").await?;
-            return Ok(());
-        }
-    };
-    // NOTE: Manually drop the connection otherwise the connection would be held
+    // NOTE: Creating a scope drop the connection otherwise the connection would be held
     // for the entirety of the duel duration. Which meant that if, for example,
     // removing the `duel_in_progress` check, I ran 5 duels at the same time
     // (the max number of connections in the pool) the bot would stop responding on the 6th one
-    drop(conn);
+    let challenger_last_loss = {
+        let mut conn = ctx.data().database.acquire().await?;
+        match get_last_loss(&mut conn, challenger.id.to_string()).await {
+            Ok(last_loss) => last_loss,
+            Err(e) => {
+                eprintln!("Could not retrieve {}'s last loss: {e:?}", challenger.name);
+                ephemeral_message(ctx, "Something went wrong when trying to join the duel.")
+                    .await?;
+                return Ok(());
+            }
+        }
+    };
 
     let challenger_name = name(challenger, &ctx).await;
 
@@ -131,9 +130,10 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         let accepter = &interaction.user;
         let accepter_name = &name(accepter, &ctx).await;
 
-        let mut conn = ctx.data().database.acquire().await?;
-        let accepter_last_loss = get_last_loss(&mut conn, accepter.id.to_string()).await?;
-        drop(conn);
+        let accepter_last_loss = {
+            let mut conn = ctx.data().database.acquire().await?;
+            get_last_loss(&mut conn, accepter.id.to_string()).await?
+        };
 
         let now = Utc::now().naive_utc();
         if accepter_last_loss + loss_cooldown_duration > now {
