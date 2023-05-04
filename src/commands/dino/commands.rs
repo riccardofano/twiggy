@@ -922,9 +922,14 @@ async fn gift_dino(
 }
 
 async fn delete_dino(conn: &mut SqliteConnection, dino_id: i64) -> Result<()> {
-    sqlx::query!("DELETE FROM Dino WHERE id = ?", dino_id)
-        .execute(&mut *conn)
+    let row = sqlx::query!("DELETE FROM Dino WHERE id = ? RETURNING filename", dino_id)
+        .fetch_one(conn)
         .await?;
+
+    let file_path = Path::new(OUTPUT_PATH).join(row.filename);
+    if file_path.exists() {
+        fs::remove_file(file_path)?;
+    }
 
     Ok(())
 }
