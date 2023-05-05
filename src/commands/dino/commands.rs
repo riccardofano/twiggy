@@ -17,7 +17,7 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::{
     common::{avatar_url, ephemeral_message, name as get_name, pick_best_x_dice_rolls},
-    Context, Result,
+    Context, Result, SUB_ROLE,
 };
 
 #[derive(Default)]
@@ -109,8 +109,16 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
         return Ok(());
     }
 
-    let hatch_roll = pick_best_x_dice_rolls(4, 1, 1, None) as i64;
-    // TODO: give twitch subs a reroll
+    let mut hatch_roll = pick_best_x_dice_rolls(4, 1, 1, None) as i64;
+    let guild_id = ctx.guild_id();
+    if guild_id.is_some()
+        && ctx
+            .author()
+            .has_role(ctx, guild_id.unwrap(), SUB_ROLE)
+            .await?
+    {
+        hatch_roll = hatch_roll.max(pick_best_x_dice_rolls(4, 1, 1, None) as i64);
+    }
 
     let mut conn = ctx.data().database.acquire().await?;
     if hatch_roll <= (MAX_FAILED_HATCHES - hatcher_record.consecutive_fails) {
