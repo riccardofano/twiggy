@@ -334,14 +334,14 @@ async fn stats(ctx: Context<'_>, user: Option<User>, silent: Option<bool>) -> Re
     let floor_rank = find_ladder_rank(floor_elo);
 
     let title = format!("{user_name}'s prowess in the  arena: {wins}W {losses}L {draws}D",);
-    let description = format!(
-        "**Current Points:** {elo_rank} - {icon} *{elo_band} League*\n
-        **Peak Rank:** {peak_elo} {peak_rank_icon}\n
-        **Floor Rank:** {floor_elo} {floor_rank_icon}",
-        icon = rank.icon,
-        elo_band = rank.name,
-        peak_rank_icon = peak_rank.icon,
-        floor_rank_icon = floor_rank.icon
+    let current_desc = format!("{} - {} *{} League*", elo_rank, rank.icon, rank.name);
+    let peak_desc = format!(
+        "{} - {} *{} League*",
+        peak_elo, peak_rank.icon, peak_rank.name
+    );
+    let floor_desc = format!(
+        "{} - {} *{} League*",
+        floor_elo, floor_rank.icon, floor_rank.name
     );
 
     ctx.send(|message| {
@@ -349,7 +349,11 @@ async fn stats(ctx: Context<'_>, user: Option<User>, silent: Option<bool>) -> Re
             embed
                 .colour(0x009933)
                 .author(|a| a.icon_url(avatar_url(&user)).name(title))
-                .description(description)
+                .fields(vec![
+                    ("Current Rank", current_desc, false),
+                    ("Peak Rank", peak_desc, false),
+                    ("Floor rank", floor_desc, false),
+                ])
         })
     })
     .await?;
