@@ -1,8 +1,7 @@
 use super::character::Character;
-use super::util::calculate_new_elo;
+use super::elo::{calculate_lp_difference, calculate_new_elo};
+use super::fight::{FightResult, RPGFight};
 
-use crate::commands::rpg::fight::{FightResult, RPGFight};
-use crate::commands::rpg::util::calculate_lp_difference;
 use crate::common::{ephemeral_interaction_response, ephemeral_message, nickname, Score};
 use crate::Context;
 
