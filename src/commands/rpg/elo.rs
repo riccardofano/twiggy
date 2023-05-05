@@ -1,3 +1,7 @@
+use std::fmt::Display;
+
+use rand::seq::SliceRandom;
+
 use crate::common::Score;
 
 pub const RANK_CHANGE_FACTOR: f64 = 56.;
@@ -6,6 +10,49 @@ pub struct LadderRank {
     pub upper_bound: i64,
     pub icon: &'static str,
     pub name: &'static str,
+}
+
+#[derive(Copy, Clone)]
+pub enum LadderPosition {
+    Top,
+    Tail,
+    Wins,
+    Losses,
+}
+
+impl LadderPosition {
+    pub fn suffix(&self) -> String {
+        match self {
+            Self::Top => "LP",
+            Self::Tail => "LP",
+            Self::Wins => "wins",
+            Self::Losses => "losses",
+        }
+        .to_string()
+    }
+
+    pub fn random_text(&self) -> &'static str {
+        let mut rng = rand::thread_rng();
+        let texts = LADDER_TEXTS[*self as usize];
+        texts
+            .choose(&mut rng)
+            .expect("Expected to have at least one ladder text for each option")
+    }
+}
+
+impl Display for LadderPosition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Top => "Top",
+                Self::Tail => "Tail",
+                Self::Wins => "Wins",
+                Self::Losses => "Losses",
+            }
+        )
+    }
 }
 
 pub const RANKS: &[LadderRank] = &[
@@ -44,6 +91,45 @@ pub const RANKS: &[LadderRank] = &[
         icon: "🏆",
         name: "Grand Master",
     },
+];
+
+const LADDER_TEXTS: &[&[&str]] = &[
+    &[
+        "is the champion",
+        "is the big cheese",
+        "is top banana",
+        "is supreme ruler",
+        "is the coolest chatter",
+        "is the gout gamer",
+        "is based and RPG pilled",
+        "probably cheated",
+        "is the raid boss",
+        "is on top",
+    ],
+    &[
+        "is everyone's best friend",
+        "had their lunch money taken",
+        "has the best personality",
+        "is making the room brighter",
+        "can't seem to catch a break",
+        "is a sweet summer child",
+        "gave peace a chance",
+    ],
+    &[
+        "has the most bedpost notches",
+        "has the biggest tally",
+        "sits on a throne of skulls",
+        "has been winning a lot",
+    ],
+    &[
+        "has the worst luck",
+        "can't catch a break",
+        "needs to work on their technique",
+        "has found inner peace",
+        "will turn it around soon",
+        "is a victim of variance",
+        "has taken the most Ls",
+    ],
 ];
 
 pub fn find_ladder_rank(elo: i64) -> &'static LadderRank {

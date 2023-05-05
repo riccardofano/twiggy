@@ -1,5 +1,5 @@
 use super::character::Character;
-use super::elo::{calculate_lp_difference, calculate_new_elo};
+use super::elo::{calculate_lp_difference, calculate_new_elo, LadderPosition};
 use super::fight::{FightResult, RPGFight};
 
 use crate::commands::rpg::elo::find_ladder_rank;
@@ -10,9 +10,10 @@ use crate::Context;
 
 use anyhow::Result;
 use chrono::{NaiveDateTime, Utc};
-use poise::serenity_prelude::{self as serenity, User};
+use poise::serenity_prelude::{self as serenity, Mention, User, UserId};
 use poise::serenity_prelude::{ButtonStyle, CreateActionRow};
 use sqlx::{Connection, QueryBuilder, SqliteConnection};
+use std::str::FromStr;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
@@ -362,18 +363,26 @@ async fn ladder(ctx: Context<'_>, silent: Option<bool>) -> Result<()> {
     let mut conn = ctx.data().database.acquire().await?;
     let ladder_state = get_ladder_state(&mut conn).await?;
 
-    let mut fields: Vec<(&str, String, bool)> = vec![];
-    if let Some(top) = ladder_state.top {
-        fields.push(("Top", top.user_id, false));
+    let mut fields: Vec<(LadderPosition, String, bool)> = vec![];
+    if let Some(user) = ladder_state.top {
+        let position = LadderPosition::Top;
+        let result = ladder_result(&user.user_id, user.elo_rank, position);
+        fields.push((position, result, false));
     };
-    if let Some(tail) = ladder_state.tail {
-        fields.push(("Tail", tail.user_id, false));
+    if let Some(user) = ladder_state.tail {
+        let position = LadderPosition::Tail;
+        let result = ladder_result(&user.user_id, user.elo_rank, position);
+        fields.push((position, result, false));
     };
-    if let Some(wins) = ladder_state.wins {
-        fields.push(("Wins", wins.user_id, false));
+    if let Some(user) = ladder_state.wins {
+        let position = LadderPosition::Wins;
+        let result = ladder_result(&user.user_id, user.elo_rank, position);
+        fields.push((position, result, false));
     };
-    if let Some(losses) = ladder_state.losses {
-        fields.push(("Losses", losses.user_id, false));
+    if let Some(user) = ladder_state.losses {
+        let position = LadderPosition::Losses;
+        let result = ladder_result(&user.user_id, user.elo_rank, position);
+        fields.push((position, result, false));
     };
 
     if fields.is_empty() {
@@ -531,4 +540,16 @@ async fn get_ladder_state(conn: &mut SqliteConnection) -> Result<LadderState> {
         wins,
         losses,
     })
+}
+
+fn ladder_result(user_id: &str, score: i64, position: LadderPosition) -> String {
+    let mention = match UserId::from_str(user_id) {
+        Ok(id) => Mention::from(id).to_string(),
+        Err(_) => "Some unknown user".to_string(),
+    };
+    format!(
+        "{mention} {random_text} with {score} {suffix}",
+        random_text = position.random_text(),
+        suffix = position.suffix()
+    )
 }
