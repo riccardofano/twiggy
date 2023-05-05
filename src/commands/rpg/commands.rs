@@ -2,7 +2,10 @@ use super::character::Character;
 use super::elo::{calculate_lp_difference, calculate_new_elo};
 use super::fight::{FightResult, RPGFight};
 
-use crate::common::{ephemeral_interaction_response, ephemeral_message, nickname, Score};
+use crate::commands::rpg::elo::find_ladder_rank;
+use crate::common::{
+    avatar_url, ephemeral_interaction_response, ephemeral_message, name, nickname, Score,
+};
 use crate::Context;
 
 use anyhow::Result;
@@ -19,7 +22,7 @@ const LOSS_COOLDOWN: Duration = Duration::from_secs(30);
 #[poise::command(
     slash_command,
     guild_only,
-    subcommands("challenge", "preview", "character")
+    subcommands("challenge", "preview", "character", "stats")
 )]
 pub async fn rpg(_ctx: Context<'_>) -> Result<()> {
     Ok(())
@@ -300,6 +303,58 @@ async fn character(
     Ok(())
 }
 
+#[poise::command(guild_only, slash_command, prefix_command)]
+async fn stats(ctx: Context<'_>, user: Option<User>, silent: Option<bool>) -> Result<()> {
+    let silent = silent.unwrap_or(true);
+    let user = match user {
+        Some(user) => user,
+        None => ctx.author().to_owned(),
+    };
+
+    let mut conn = ctx.data().database.acquire().await?;
+    let user_name = name(&user, &ctx).await;
+    let Some(user_record) = try_get_character_scoresheet(&mut conn, &user.id.to_string()).await? else {
+        ephemeral_message(ctx, &format!("Hmm, {user_name}... It seems you are yet to test your steel.")).await?;
+        return Ok(())
+    };
+
+    let CharacterScoresheet {
+        wins,
+        losses,
+        draws,
+        elo_rank,
+        peak_elo,
+        floor_elo,
+    } = user_record;
+
+    let rank = find_ladder_rank(elo_rank);
+    let peak_rank = find_ladder_rank(peak_elo);
+    let floor_rank = find_ladder_rank(floor_elo);
+
+    let title = format!("{user_name}'s prowess in the  arena: {wins}W {losses}L {draws}D",);
+    let description = format!(
+        "**Current Points:** {elo_rank} - {icon} *{elo_band} League*\n
+        **Peak Rank:** {peak_elo} {peak_rank_icon}\n
+        **Floor Rank:** {floor_elo} {floor_rank_icon}",
+        icon = rank.icon,
+        elo_band = rank.name,
+        peak_rank_icon = peak_rank.icon,
+        floor_rank_icon = floor_rank.icon
+    );
+
+    ctx.send(|message| {
+        message.ephemeral(silent).embed(|embed| {
+            embed
+                .colour(0x009933)
+                .author(|a| a.icon_url(avatar_url(&user)).name(title))
+                .description(description)
+        })
+    })
+    .await?;
+
+    Ok(())
+}
+
 struct CharacterPastStats {
     last_loss: NaiveDateTime,
     elo_rank: i64,
@@ -319,6 +374,31 @@ async fn get_character_stats(
         user_id
     )
     .fetch_one(&mut *conn)
+    .await?;
+
+    Ok(row)
+}
+
+struct CharacterScoresheet {
+    wins: i64,
+    losses: i64,
+    draws: i64,
+    elo_rank: i64,
+    peak_elo: i64,
+    floor_elo: i64,
+}
+
+async fn try_get_character_scoresheet(
+    conn: &mut SqliteConnection,
+    user_id: &str,
+) -> Result<Option<CharacterScoresheet>> {
+    let row = sqlx::query_as!(
+        CharacterScoresheet,
+        r#"SELECT wins, losses, draws, elo_rank, peak_elo, floor_elo
+        FROM RPGCharacter WHERE user_id = ?"#,
+        user_id
+    )
+    .fetch_optional(conn)
     .await?;
 
     Ok(row)

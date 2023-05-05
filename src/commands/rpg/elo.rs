@@ -3,64 +3,67 @@ use crate::common::Score;
 pub const RANK_CHANGE_FACTOR: f64 = 56.;
 
 pub struct LadderRank {
-    upper_bound: i64,
-    icon: &'static str,
-    _name: &'static str,
+    pub upper_bound: i64,
+    pub icon: &'static str,
+    pub name: &'static str,
 }
 
 pub const RANKS: &[LadderRank] = &[
     LadderRank {
         upper_bound: 700,
         icon: "🪵",
-        _name: "Wood",
+        name: "Wood",
     },
     LadderRank {
         upper_bound: 800,
         icon: "🥉",
-        _name: "Bronze",
+        name: "Bronze",
     },
     LadderRank {
         upper_bound: 900,
         icon: "🥈",
-        _name: "Silver",
+        name: "Silver",
     },
     LadderRank {
         upper_bound: 1100,
         icon: "🥇",
-        _name: "Gold",
+        name: "Gold",
     },
     LadderRank {
         upper_bound: 1200,
         icon: "💎",
-        _name: "Diamond",
+        name: "Diamond",
     },
     LadderRank {
         upper_bound: 1300,
         icon: "🎀",
-        _name: "Master",
+        name: "Master",
     },
     LadderRank {
         upper_bound: i64::MAX,
         icon: "🏆",
-        _name: "Grand Master",
+        name: "Grand Master",
     },
 ];
 
-pub fn calculate_lp_difference(old_elo: i64, new_elo: i64) -> String {
-    let elo_difference = new_elo - old_elo;
-
+pub fn find_ladder_rank(elo: i64) -> &'static LadderRank {
     let mut i = 0;
-    let icon = loop {
-        if RANKS[i].upper_bound > new_elo {
-            break RANKS[i].icon;
+    loop {
+        if RANKS[i].upper_bound > elo {
+            return &RANKS[i];
         }
         i += 1;
-    };
+    }
+}
+
+pub fn calculate_lp_difference(old_elo: i64, new_elo: i64) -> String {
+    let elo_difference = new_elo - old_elo;
+    let rank = find_ladder_rank(new_elo);
 
     if elo_difference > 0 {
-        format!("{icon} gained {}LP", elo_difference)
+        format!("{} gained {}LP", rank.icon, elo_difference)
     } else {
-        format!("{icon} lost {}LP", -elo_difference)
+        format!("{} lost {}LP", rank.icon, -elo_difference)
     }
 }
 
