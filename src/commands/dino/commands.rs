@@ -158,7 +158,15 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     update_last_user_action(&mut transaction, &author_id, UserAction::Hatch(0)).await?;
 
     let author_name = get_name(ctx.author(), &ctx).await;
-    let message = send_dino_embed(ctx, &dino, &author_name, &image_path, now).await?;
+    let message = send_dino_embed(
+        ctx,
+        &dino,
+        &author_name,
+        &avatar_url(ctx.author()),
+        &image_path,
+        now,
+    )
+    .await?;
 
     update_hatch_message(&mut transaction, dino.id, &message).await?;
 
@@ -303,16 +311,27 @@ async fn view(
     };
 
     let owner_user_id = UserId::from_str(&dino.owner_id)?;
-    let user_name = match owner_user_id.to_user(&ctx).await {
-        Ok(user) => get_name(&user, &ctx).await,
+    let (user_name, user_avatar) = match owner_user_id.to_user(&ctx).await {
+        Ok(user) => (get_name(&user, &ctx).await, avatar_url(&user)),
         Err(_) => {
             eprintln!("Could not find user with id: {owner_user_id}. Using a default owner name for this dino.");
-            "unknown user".to_string()
+            (
+                "unknown user".to_string(),
+                "https://cdn.discordapp.com/embed/avatars/0.png".to_string(),
+            )
         }
     };
     let image_path = Path::new(OUTPUT_PATH).join(&dino.filename);
 
-    send_dino_embed(ctx, &dino, &user_name, &image_path, dino.created_at).await?;
+    send_dino_embed(
+        ctx,
+        &dino,
+        &user_name,
+        &user_avatar,
+        &image_path,
+        dino.created_at,
+    )
+    .await?;
 
     Ok(())
 }
@@ -483,6 +502,7 @@ async fn slurp(
         ctx,
         &dino,
         &author_name,
+        &avatar_url(ctx.author()),
         &image_path,
         Utc::now().naive_utc(),
     )
@@ -629,8 +649,6 @@ fn generate_dino_name(parts: &DinoParts) -> String {
     let mouth_start = 3.min(mouth.len() - 3);
     let eyes_start = 6.min(eyes.len() - 3);
 
-    // TODO: add random characters at the end like in the original
-
     format!(
         "{}{}{}",
         &body[..body_end],
@@ -663,7 +681,6 @@ fn generate_dino_collection_image(collection: &[DinoRecord]) -> Result<Vec<u8>> 
 
     let output_path = Path::new(OUTPUT_PATH);
 
-    // TODO: remember to delete the image when the dino gets deleted
     let mut image: RgbaImage = ImageBuffer::new(width, height);
     for (i, dino) in collection.iter().enumerate() {
         let x = (i as u32 % columns) * (COLUMN_MARGIN + DINO_IMAGE_SIZE);
@@ -873,6 +890,7 @@ async fn send_dino_embed(
     ctx: Context<'_>,
     dino: &DinoRecord,
     owner_name: &str,
+    owner_avatar: &str,
     image_path: &Path,
     created_at: NaiveDateTime,
 ) -> Result<String> {
@@ -906,8 +924,7 @@ async fn send_dino_embed(
                 .embed(|embed| {
                     embed
                         .colour(0x66ff99)
-                        // TODO: add avatar
-                        .author(|author| author.name(owner_name))
+                        .author(|author| author.name(owner_name).icon_url(owner_avatar))
                         .title(&dino.name)
                         .description(format!("**Created:** <t:{}>", created_at.timestamp()))
                         .footer(|f| {
