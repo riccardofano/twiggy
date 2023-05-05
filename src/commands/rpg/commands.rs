@@ -22,7 +22,7 @@ const LOSS_COOLDOWN: Duration = Duration::from_secs(30);
 #[poise::command(
     slash_command,
     guild_only,
-    subcommands("challenge", "preview", "character", "stats")
+    subcommands("challenge", "preview", "character", "stats", "ladder")
 )]
 pub async fn rpg(_ctx: Context<'_>) -> Result<()> {
     Ok(())
@@ -325,6 +325,7 @@ async fn stats(ctx: Context<'_>, user: Option<User>, silent: Option<bool>) -> Re
         elo_rank,
         peak_elo,
         floor_elo,
+        ..
     } = user_record;
 
     let rank = find_ladder_rank(elo_rank);
@@ -348,6 +349,44 @@ async fn stats(ctx: Context<'_>, user: Option<User>, silent: Option<bool>) -> Re
                 .colour(0x009933)
                 .author(|a| a.icon_url(avatar_url(&user)).name(title))
                 .description(description)
+        })
+    })
+    .await?;
+
+    Ok(())
+}
+
+#[poise::command(guild_only, slash_command, prefix_command)]
+async fn ladder(ctx: Context<'_>, silent: Option<bool>) -> Result<()> {
+    let silent = silent.unwrap_or(true);
+    let mut conn = ctx.data().database.acquire().await?;
+    let ladder_state = get_ladder_state(&mut conn).await?;
+
+    let mut fields: Vec<(&str, String, bool)> = vec![];
+    if let Some(top) = ladder_state.top {
+        fields.push(("Top", top.user_id, false));
+    };
+    if let Some(tail) = ladder_state.tail {
+        fields.push(("Tail", tail.user_id, false));
+    };
+    if let Some(wins) = ladder_state.wins {
+        fields.push(("Wins", wins.user_id, false));
+    };
+    if let Some(losses) = ladder_state.losses {
+        fields.push(("Losses", losses.user_id, false));
+    };
+
+    if fields.is_empty() {
+        ephemeral_message(ctx, "The arena is clean. No violence has happend yet.").await?;
+        return Ok(());
+    }
+
+    ctx.send(|message| {
+        message.ephemeral(silent).embed(|embed| {
+            embed
+                .colour(0x009933)
+                .title("The State of the Ladder")
+                .fields(fields)
         })
     })
     .await?;
@@ -379,6 +418,7 @@ async fn get_character_stats(
     Ok(row)
 }
 
+#[allow(dead_code)]
 struct CharacterScoresheet {
     wins: i64,
     losses: i64,
@@ -386,6 +426,8 @@ struct CharacterScoresheet {
     elo_rank: i64,
     peak_elo: i64,
     floor_elo: i64,
+    user_id: String,
+    last_loss: NaiveDateTime,
 }
 
 async fn try_get_character_scoresheet(
@@ -394,8 +436,7 @@ async fn try_get_character_scoresheet(
 ) -> Result<Option<CharacterScoresheet>> {
     let row = sqlx::query_as!(
         CharacterScoresheet,
-        r#"SELECT wins, losses, draws, elo_rank, peak_elo, floor_elo
-        FROM RPGCharacter WHERE user_id = ?"#,
+        r#"SELECT * FROM RPGCharacter WHERE user_id = ?"#,
         user_id
     )
     .fetch_optional(conn)
@@ -449,4 +490,45 @@ async fn new_fight_record(
     .await?;
 
     Ok(())
+}
+
+struct LadderState {
+    top: Option<CharacterScoresheet>,
+    tail: Option<CharacterScoresheet>,
+    wins: Option<CharacterScoresheet>,
+    losses: Option<CharacterScoresheet>,
+}
+
+async fn get_ladder_state(conn: &mut SqliteConnection) -> Result<LadderState> {
+    let top = sqlx::query_as!(
+        CharacterScoresheet,
+        "SELECT * FROM RPGCharacter WHERE elo_rank = (SELECT MAX(elo_rank) FROM RPGCharacter)"
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    let tail = sqlx::query_as!(
+        CharacterScoresheet,
+        "SELECT * FROM RPGCharacter WHERE elo_rank = (SELECT MIN(elo_rank) FROM RPGCharacter)"
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    let wins = sqlx::query_as!(
+        CharacterScoresheet,
+        "SELECT * FROM RPGCharacter WHERE wins = (SELECT MAX(wins) FROM RPGCharacter)"
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    let losses = sqlx::query_as!(
+        CharacterScoresheet,
+        "SELECT * FROM RPGCharacter WHERE wins = (SELECT MAX(wins) FROM RPGCharacter)"
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    Ok(LadderState {
+        top,
+        tail,
+        wins,
+        losses,
+    })
 }
