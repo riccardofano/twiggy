@@ -5,11 +5,14 @@ use rand::Rng;
 
 use crate::{common::ephemeral_message, Context, Result};
 
+// These commands were originally made in american english so I'm keeping them
+// that way, there won't be any `ou`s in this module.
+
 #[poise::command(
     guild_only,
     slash_command,
     prefix_command,
-    subcommands("change", "random")
+    subcommands("change", "random", "favorite")
 )]
 pub async fn color(_ctx: Context<'_>) -> Result<()> {
     Ok(())
@@ -17,14 +20,9 @@ pub async fn color(_ctx: Context<'_>) -> Result<()> {
 
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn change(ctx: Context<'_>, hexcode: String) -> Result<()> {
-    let hexcode = hexcode.strip_prefix('#').unwrap_or(&hexcode);
-
-    let color = match u32::from_str_radix(hexcode, 16) {
-        Ok(code) if hexcode.len() == 6 && code > 0 => code,
-        _ => {
-            ephemeral_message(ctx, "Please provide a valid color.").await?;
-            return Ok(());
-        }
+    let Some(color) = to_color(&hexcode) else {
+        ephemeral_message(ctx, "Please provide a valid hex color code.").await?;
+        return Ok(())
     };
 
     let Some(author_member) = ctx.author_member().await else {
@@ -102,6 +100,34 @@ async fn change_color(
     Ok(role_name)
 }
 
+#[poise::command(guild_only, slash_command, prefix_command)]
+pub async fn favorite(ctx: Context<'_>, hexcode: String) -> Result<()> {
+    let Some(color) = to_color(&hexcode) else {
+        ephemeral_message(ctx, "Please provide a valid hex color code.").await?;
+        return Ok(())
+    };
+    let color_code = format!("#{color:06X}");
+    let author_id = ctx.author().id.to_string();
+
+    sqlx::query!(
+        r#"INSERT OR IGNORE INTO User (id) VALUES (?);
+        UPDATE User SET fav_color = ? WHERE id = ?"#,
+        author_id,
+        color_code,
+        author_id
+    )
+    .execute(&ctx.data().database)
+    .await?;
+
+    ephemeral_message(
+        ctx,
+        format!("{color_code} has been set as your favorite color!"),
+    )
+    .await?;
+
+    Ok(())
+}
+
 #[poise::command(
     guild_only,
     slash_command,
@@ -126,6 +152,15 @@ pub async fn uncolor(ctx: Context<'_>, member: Member) -> Result<()> {
     .await?;
 
     Ok(())
+}
+
+fn to_color(hexcode: &str) -> Option<u32> {
+    let hexcode = hexcode.strip_prefix('#').unwrap_or(hexcode);
+
+    match u32::from_str_radix(hexcode, 16) {
+        Ok(code) if hexcode.len() == 6 && code > 0 => Some(code),
+        _ => None,
+    }
 }
 
 async fn is_role_unused(ctx: Context<'_>, role: &Role) -> Result<bool> {
