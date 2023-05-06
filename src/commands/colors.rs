@@ -1,7 +1,10 @@
 use std::borrow::Cow;
+use std::time::Duration;
 
+use chrono::{NaiveDateTime, Utc};
 use poise::serenity_prelude::{Member, Mention, Mutex, Role};
 use rand::Rng;
+use sqlx::SqlitePool;
 
 use crate::{common::ephemeral_message, Context, Result};
 
@@ -9,6 +12,7 @@ use crate::{common::ephemeral_message, Context, Result};
 // that way, there won't be any `ou`s in this module.
 
 const DEFAULT_GAMBLE_FAIL_CHANCE: u8 = 15;
+const RANDOM_COLOR_COOLDOWN: Duration = Duration::from_secs(60 * 60);
 
 #[poise::command(
     guild_only,
@@ -23,6 +27,11 @@ pub async fn color(_ctx: Context<'_>) -> Result<()> {
 
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn change(ctx: Context<'_>, hexcode: String) -> Result<()> {
+    if let Some(reason) = is_on_cooldown(ctx).await? {
+        ephemeral_message(ctx, reason).await?;
+        return Ok(());
+    }
+
     let Some(color) = to_color(&hexcode) else {
         ephemeral_message(ctx, "Please provide a valid hex color code.").await?;
         return Ok(())
@@ -53,6 +62,11 @@ async fn change(ctx: Context<'_>, hexcode: String) -> Result<()> {
 
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn random(ctx: Context<'_>) -> Result<()> {
+    if let Some(reason) = is_on_cooldown(ctx).await? {
+        ephemeral_message(ctx, reason).await?;
+        return Ok(());
+    }
+
     let Some(author) = ctx.author_member().await else {
         ephemeral_message(ctx, "I could not find your roles.").await?;
         return Ok(())
@@ -69,7 +83,7 @@ async fn random(ctx: Context<'_>) -> Result<()> {
         return Ok(());
     }
 
-    // TODO: add hour cooldown
+    update_last_random_cooldown(&ctx.data().database, &ctx.author().id.to_string()).await?;
     ctx.say(format!(
         "Hahaha. Get stuck with {} for an hour.",
         role_result.unwrap()
@@ -81,6 +95,11 @@ async fn random(ctx: Context<'_>) -> Result<()> {
 
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn gamble(ctx: Context<'_>) -> Result<()> {
+    if let Some(reason) = is_on_cooldown(ctx).await? {
+        ephemeral_message(ctx, reason).await?;
+        return Ok(());
+    }
+
     let Some(member) = ctx.author_member().await else {
         ephemeral_message(ctx, "I could not find your roles").await?;
         return Ok(())
@@ -111,7 +130,7 @@ async fn gamble(ctx: Context<'_>) -> Result<()> {
         return Ok(());
     }
 
-    // TODO: add hour cooldown
+    update_last_random_cooldown(&ctx.data().database, &ctx.author().id.to_string()).await?;
     ctx.say(format!(
         "Hahaha. Get stuck with {} for an hour.",
         role_result.unwrap()
@@ -176,6 +195,11 @@ pub async fn favorite(ctx: Context<'_>, hexcode: String) -> Result<()> {
 
 #[poise::command(guild_only, slash_command, prefix_command)]
 pub async fn lazy(ctx: Context<'_>) -> Result<()> {
+    if let Some(reason) = is_on_cooldown(ctx).await? {
+        ephemeral_message(ctx, reason).await?;
+        return Ok(());
+    }
+
     let author_id = ctx.author().id.to_string();
 
     let row = sqlx::query!(
@@ -319,4 +343,57 @@ async fn remove_unused_color_roles(ctx: Context<'_>, member: &mut Cow<'_, Member
 fn generate_random_hex_color() -> u32 {
     let mut rng = rand::thread_rng();
     rng.gen_range(0..0x1000000)
+}
+
+async fn update_last_random_cooldown(db: &SqlitePool, user_id: &str) -> Result<()> {
+    sqlx::query!(
+        r#"INSERT OR IGNORE INTO User (id) VALUES (?);
+        UPDATE User SET last_random = datetime('now') WHERE id = ?"#,
+        user_id,
+        user_id
+    )
+    .execute(db)
+    .await?;
+
+    Ok(())
+}
+
+struct UserCooldowns {
+    last_random: NaiveDateTime,
+    last_loss: NaiveDateTime,
+}
+
+async fn is_on_cooldown(ctx: Context<'_>) -> Result<Option<String>> {
+    let user_id = ctx.author().id.to_string();
+    let row = sqlx::query_as!(
+        UserCooldowns,
+        r#"INSERT OR IGNORE INTO User (id) VALUES (?);
+        SELECT last_random, last_loss FROM User WHERE id = ?"#,
+        user_id,
+        user_id
+    )
+    .fetch_one(&ctx.data().database)
+    .await?;
+
+    let now = Utc::now().naive_utc();
+    let cooldown_duration = chrono::Duration::from_std(RANDOM_COLOR_COOLDOWN)?;
+
+    let permitted_time_from_random = row.last_random + cooldown_duration;
+    let permitted_time_from_loss = row.last_loss + cooldown_duration;
+
+    if permitted_time_from_random > now {
+        return Ok(Some(format!(
+            "You recently randomed/gambled, you can change your color <t:{}:R>",
+            permitted_time_from_random.timestamp()
+        )));
+    }
+
+    if permitted_time_from_loss > now {
+        return Ok(Some(format!(
+            "You recently dueled and lost, you can change your color <t:{}:R>",
+            permitted_time_from_loss.timestamp()
+        )));
+    }
+
+    Ok(None)
 }
