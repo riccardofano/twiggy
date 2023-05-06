@@ -8,11 +8,13 @@ use crate::{common::ephemeral_message, Context, Result};
 // These commands were originally made in american english so I'm keeping them
 // that way, there won't be any `ou`s in this module.
 
+const GAMBLE_FAIL_CHANCE: f32 = 0.15;
+
 #[poise::command(
     guild_only,
     slash_command,
     prefix_command,
-    subcommands("change", "random", "favorite", "lazy")
+    subcommands("change", "random", "favorite", "lazy", "gamble")
 )]
 pub async fn color(_ctx: Context<'_>) -> Result<()> {
     Ok(())
@@ -55,23 +57,57 @@ async fn random(ctx: Context<'_>) -> Result<()> {
         return Ok(())
     };
 
-    let role_name = match change_color(ctx, author, None).await {
-        Ok(name) => name,
-        Err(e) => {
-            eprintln!("Error while trying to change to a random color: {e}");
-            ephemeral_message(
-                ctx,
-                "Something went wrong while trying to change your color.
-                You're spared for now. :(",
-            )
-            .await?;
-            return Ok(());
-        }
-    };
+    let role_result = change_color(ctx, author, None).await;
+    if let Err(e) = role_result {
+        eprintln!("Error while trying to change to a random color: {e}");
+        ephemeral_message(
+            ctx,
+            "Something went wrong while trying to change your color. You're spared for now. :(",
+        )
+        .await?;
+        return Ok(());
+    }
 
     // TODO: add hour cooldown
-    ctx.say(format!("Hahaha. Get stuck with {role_name} for an hour."))
+    ctx.say(format!(
+        "Hahaha. Get stuck with {} for an hour.",
+        role_result.unwrap()
+    ))
+    .await?;
+
+    Ok(())
+}
+
+#[poise::command(guild_only, slash_command, prefix_command)]
+async fn gamble(ctx: Context<'_>) -> Result<()> {
+    let Some(member) = ctx.author_member().await else {
+        ephemeral_message(ctx, "I could not find your roles").await?;
+        return Ok(())
+    };
+
+    let roll: f32 = rand::random();
+    if roll > GAMBLE_FAIL_CHANCE {
+        ephemeral_message(ctx, "Yay! You get to keep your color!").await?;
+        return Ok(());
+    }
+
+    let role_result = change_color(ctx, member, None).await;
+    if let Err(e) = role_result {
+        eprintln!("Error while trying to change to a random color: {e}");
+        ephemeral_message(
+            ctx,
+            "Something went wrong while trying to change your color. You're spared for now. :(",
+        )
         .await?;
+        return Ok(());
+    }
+
+    // TODO: add hour cooldown
+    ctx.say(format!(
+        "Hahaha. Get stuck with {} for an hour.",
+        role_result.unwrap()
+    ))
+    .await?;
 
     Ok(())
 }
