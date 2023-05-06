@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use poise::serenity_prelude::{Member, Mention, Role};
+use poise::serenity_prelude::{Member, Mention, Mutex, Role};
 use rand::Rng;
 
 use crate::{common::ephemeral_message, Context, Result};
@@ -8,13 +8,14 @@ use crate::{common::ephemeral_message, Context, Result};
 // These commands were originally made in american english so I'm keeping them
 // that way, there won't be any `ou`s in this module.
 
-const GAMBLE_FAIL_CHANCE: f32 = 0.15;
+const DEFAULT_GAMBLE_FAIL_CHANCE: u8 = 15;
 
 #[poise::command(
     guild_only,
     slash_command,
     prefix_command,
-    subcommands("change", "random", "favorite", "lazy", "gamble")
+    subcommands("change", "random", "favorite", "lazy", "gamble", "setgamblechance"),
+    custom_data = "Mutex::new(DEFAULT_GAMBLE_FAIL_CHANCE)"
 )]
 pub async fn color(_ctx: Context<'_>) -> Result<()> {
     Ok(())
@@ -85,8 +86,16 @@ async fn gamble(ctx: Context<'_>) -> Result<()> {
         return Ok(())
     };
 
-    let roll: f32 = rand::random();
-    if roll > GAMBLE_FAIL_CHANCE {
+    let custom_data = ctx.parent_commands()[0]
+        .custom_data
+        .downcast_ref::<Mutex<u8>>()
+        .expect("Expected to have passed the gamble chance as custom_data");
+    let gamble_chance = custom_data.lock().await;
+    let roll: u8 = {
+        let mut rng = rand::thread_rng();
+        rng.gen_range(0..=100)
+    };
+    if roll > *gamble_chance {
         ephemeral_message(ctx, "Yay! You get to keep your color!").await?;
         return Ok(());
     }
@@ -236,6 +245,29 @@ pub async fn uncolor(ctx: Context<'_>, member: Member) -> Result<()> {
         ),
     )
     .await?;
+
+    Ok(())
+}
+
+#[poise::command(
+    guild_only,
+    slash_command,
+    prefix_command,
+    required_permissions = "ADMINISTRATOR"
+)]
+async fn setgamblechance(ctx: Context<'_>, percent: u8) -> Result<()> {
+    if !(0..=100).contains(&percent) {
+        ephemeral_message(ctx, "Please provide a number between 0 and 100").await?;
+        return Ok(());
+    }
+
+    let custom_data = ctx.parent_commands()[0]
+        .custom_data
+        .downcast_ref::<Mutex<u8>>()
+        .expect("Expected to have passed the gamble chance as custom_data");
+
+    *custom_data.lock().await = percent;
+    ephemeral_message(ctx, format!("Gamble chance has been set to {percent}%")).await?;
 
     Ok(())
 }

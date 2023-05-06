@@ -51,7 +51,9 @@ async fn main() {
             ..Default::default()
         })
         .token(std::env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN"))
-        .intents(serenity::GatewayIntents::non_privileged())
+        .intents(
+            serenity::GatewayIntents::non_privileged() | serenity::GatewayIntents::MESSAGE_CONTENT,
+        )
         .setup(|ctx, _ready, framework| {
             Box::pin(async move {
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
@@ -88,8 +90,8 @@ async fn event_event_handler(
         println!("{} is connected!", data_about_bot.user.name);
 
         tokio::select! {
-                _ = setup_rpg_summary(ctx, user_data) => {}
-                _ = setup_dino_collector(ctx, user_data) => {}
+            _ = setup_rpg_summary(ctx, user_data) => {}
+            _ = setup_dino_collector(ctx, user_data) => {}
         }
     }
 
