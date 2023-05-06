@@ -1,10 +1,16 @@
 use std::borrow::Cow;
 
 use poise::serenity_prelude::{Member, Mention, Role};
+use rand::Rng;
 
 use crate::{common::ephemeral_message, Context, Result};
 
-#[poise::command(guild_only, slash_command, prefix_command, subcommands("change"))]
+#[poise::command(
+    guild_only,
+    slash_command,
+    prefix_command,
+    subcommands("change", "random")
+)]
 pub async fn color(_ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
@@ -44,6 +50,33 @@ async fn change(ctx: Context<'_>, hexcode: String) -> Result<()> {
     Ok(())
 }
 
+#[poise::command(guild_only, slash_command, prefix_command)]
+async fn random(ctx: Context<'_>) -> Result<()> {
+    let Some(author) = ctx.author_member().await else {
+        ephemeral_message(ctx, "I could not find your roles.").await?;
+        return Ok(())
+    };
+
+    let role_name = match change_color(ctx, author, None).await {
+        Ok(name) => name,
+        Err(e) => {
+            eprintln!("Error while trying to change to a random color: {e}");
+            ephemeral_message(
+                ctx,
+                "Something went wrong while trying to change your color. You're spared for now. :(",
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+
+    // TODO: add hour cooldown
+    ctx.say(format!("Hahaha. Get stuck with {role_name} for an hour."))
+        .await?;
+
+    Ok(())
+}
+
 async fn change_color(
     ctx: Context<'_>,
     mut member: Cow<'_, Member>,
@@ -53,9 +86,7 @@ async fn change_color(
         return Err(anyhow::anyhow!("Could not find the guild guild where to assign a new color role."));
     };
 
-    // TODO: generate color if it's None
-    let color = color.unwrap();
-
+    let color = color.unwrap_or_else(generate_random_hex_color);
     let role_name = format!("#{color:06X}");
     let role = match guild.role_by_name(&role_name) {
         Some(role) => role.clone(),
@@ -65,6 +96,7 @@ async fn change_color(
                 .await?
         }
     };
+    // TODO: remove all other color roles if they exist
     member.to_mut().add_role(ctx, role.id).await?;
 
     Ok(role_name)
@@ -124,4 +156,9 @@ async fn is_role_unused(ctx: Context<'_>, role: &Role) -> Result<bool> {
     }
 
     Ok(true)
+}
+
+fn generate_random_hex_color() -> u32 {
+    let mut rng = rand::thread_rng();
+    rng.gen_range(0..0x1000000)
 }
