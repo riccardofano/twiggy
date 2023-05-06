@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use poise::serenity_prelude::{Member, Mention, Role};
 
 use crate::{common::ephemeral_message, Context, Result};
@@ -19,15 +21,40 @@ async fn change(ctx: Context<'_>, hexcode: String) -> Result<()> {
         }
     };
 
-    let Some(guild) = ctx.guild() else {
-        ephemeral_message(ctx, "Could not find the guild you're in.").await?;
+    let Some(author_member) = ctx.author_member().await else {
+        ephemeral_message(ctx, "I could not find your roles.").await?;
         return Ok(());
     };
 
-    let Some(mut author_member) = ctx.author_member().await else {
-        ephemeral_message(ctx, "Could not find your roles.").await?;
-        return Ok(());
+    let role_name = match change_color(ctx, author_member, Some(color)).await {
+        Ok(name) => name,
+        Err(e) => {
+            eprintln!("Error while trying to change color: {e}");
+            ephemeral_message(
+                ctx,
+                "Something went wrong while trying to change your color. :(",
+            )
+            .await?;
+            return Ok(());
+        }
     };
+
+    ephemeral_message(ctx, format!("The role color {role_name} has been added!")).await?;
+
+    Ok(())
+}
+
+async fn change_color(
+    ctx: Context<'_>,
+    mut member: Cow<'_, Member>,
+    color: Option<u32>,
+) -> Result<String> {
+    let Some(guild) = ctx.guild() else {
+        return Err(anyhow::anyhow!("Could not find the guild guild where to assign a new color role."));
+    };
+
+    // TODO: generate color if it's None
+    let color = color.unwrap();
 
     let role_name = format!("#{color:06X}");
     let role = match guild.role_by_name(&role_name) {
@@ -38,11 +65,9 @@ async fn change(ctx: Context<'_>, hexcode: String) -> Result<()> {
                 .await?
         }
     };
+    member.to_mut().add_role(ctx, role.id).await?;
 
-    author_member.to_mut().add_role(ctx, role.id).await?;
-    ephemeral_message(ctx, format!("The role color {role_name} has been added!")).await?;
-
-    Ok(())
+    Ok(role_name)
 }
 
 #[poise::command(
