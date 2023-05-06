@@ -30,7 +30,15 @@ async fn main() {
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![rpg(), eightball(), duel(), duelstats(), dino(), color()],
+            commands: vec![
+                rpg(),
+                eightball(),
+                duel(),
+                duelstats(),
+                dino(),
+                color(),
+                uncolor(),
+            ],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some(String::from(">")),
                 mention_as_prefix: false,

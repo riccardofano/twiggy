@@ -1,3 +1,5 @@
+use poise::serenity_prelude::{Member, Mention, Role};
+
 use crate::{common::ephemeral_message, Context, Result};
 
 #[poise::command(guild_only, slash_command, prefix_command, subcommands("change"))]
@@ -41,4 +43,60 @@ async fn change(ctx: Context<'_>, hexcode: String) -> Result<()> {
     ephemeral_message(ctx, format!("The role color {role_name} has been added!")).await?;
 
     Ok(())
+}
+
+#[poise::command(
+    guild_only,
+    slash_command,
+    prefix_command,
+    required_permissions = "MODERATE_MEMBERS"
+)]
+pub async fn uncolor(ctx: Context<'_>, mut member: Member) -> Result<()> {
+    let Some(roles) = member.roles(ctx) else {
+        ephemeral_message(ctx, "This person has no roles.").await?;
+        return Ok(())
+    };
+    let mut removed_role = false;
+
+    for role in roles.iter() {
+        if !role.name.starts_with('#') {
+            continue;
+        }
+        member.remove_role(ctx, role.id).await?;
+        removed_role = true;
+
+        if is_role_unused(ctx, role).await? {
+            role.guild_id.delete_role(ctx, role.id).await?;
+        }
+    }
+
+    if !removed_role {
+        ephemeral_message(ctx, "There were no roles to remove.").await?;
+        return Ok(());
+    }
+
+    ephemeral_message(
+        ctx,
+        format!(
+            "All color roles have been removed from {}.",
+            Mention::from(member.user.id)
+        ),
+    )
+    .await?;
+
+    Ok(())
+}
+
+async fn is_role_unused(ctx: Context<'_>, role: &Role) -> Result<bool> {
+    let members = role.guild_id.members(ctx, None, None).await?;
+    for member in members {
+        let Some(roles) = member.roles(ctx) else {
+            continue
+        };
+        if roles.contains(role) {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
 }
