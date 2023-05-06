@@ -314,7 +314,9 @@ async fn stats(ctx: Context<'_>, user: Option<User>, silent: Option<bool>) -> Re
 
     let mut conn = ctx.data().database.acquire().await?;
     let user_name = name(&user, &ctx).await;
-    let Some(user_record) = try_get_character_scoresheet(&mut conn, &user.id.to_string()).await? else {
+    let character_scoresheet =
+        try_get_character_scoresheet(&mut conn, &user.id.to_string()).await?;
+    let Some(user_record) =  character_scoresheet else {
         ephemeral_message(ctx, &format!("Hmm, {user_name}... It seems you are yet to test your steel.")).await?;
         return Ok(())
     };
