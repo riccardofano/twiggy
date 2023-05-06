@@ -12,7 +12,7 @@ use crate::{common::ephemeral_message, Context, Result};
     guild_only,
     slash_command,
     prefix_command,
-    subcommands("change", "random", "favorite")
+    subcommands("change", "random", "favorite", "lazy")
 )]
 pub async fn color(_ctx: Context<'_>) -> Result<()> {
     Ok(())
@@ -61,7 +61,8 @@ async fn random(ctx: Context<'_>) -> Result<()> {
             eprintln!("Error while trying to change to a random color: {e}");
             ephemeral_message(
                 ctx,
-                "Something went wrong while trying to change your color. You're spared for now. :(",
+                "Something went wrong while trying to change your color.
+                You're spared for now. :(",
             )
             .await?;
             return Ok(());
@@ -124,6 +125,55 @@ pub async fn favorite(ctx: Context<'_>, hexcode: String) -> Result<()> {
         format!("{color_code} has been set as your favorite color!"),
     )
     .await?;
+
+    Ok(())
+}
+
+#[poise::command(guild_only, slash_command, prefix_command)]
+pub async fn lazy(ctx: Context<'_>) -> Result<()> {
+    let author_id = ctx.author().id.to_string();
+
+    let row = sqlx::query!(
+        r#"INSERT OR IGNORE INTO User (id) VALUES (?);
+        SELECT fav_color FROM User WHERE id = ?"#,
+        author_id,
+        author_id
+    )
+    .fetch_one(&ctx.data().database)
+    .await?;
+
+    let Some(color_code) = row.fav_color else {
+        ephemeral_message(
+            ctx,
+            "You're so lazy you haven't even set a favorite color, \
+            set one for next time!"
+        ).await?;
+
+        return Ok(());
+    };
+
+    let Some(author_member) = ctx.author_member().await else {
+        ephemeral_message(ctx, "Are you not in a guild right now?").await?;
+        return Ok(())
+    };
+
+    let Some(color) = to_color(&color_code) else {
+        sqlx::query!("UPDATE User SET fav_color = NULL WHERE id = ?", author_id)
+            .execute(&ctx.data().database)
+            .await?;
+
+        ephemeral_message(
+            ctx,
+            "For some reason the color that was saved was invalid, \
+            I reset it for you, \
+            you should now set a new favorite.",
+        )
+        .await?;
+        return Ok(());
+    };
+
+    let color_role = change_color(ctx, author_member, Some(color)).await?;
+    ephemeral_message(ctx, format!("Color has been changed to {color_role}")).await?;
 
     Ok(())
 }
