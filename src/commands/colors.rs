@@ -96,7 +96,7 @@ async fn change_color(
                 .await?
         }
     };
-    // TODO: remove all other color roles if they exist
+    remove_unused_color_roles(ctx, &mut member).await?;
     member.to_mut().add_role(ctx, role.id).await?;
 
     Ok(role_name)
@@ -108,35 +108,19 @@ async fn change_color(
     prefix_command,
     required_permissions = "MODERATE_MEMBERS"
 )]
-pub async fn uncolor(ctx: Context<'_>, mut member: Member) -> Result<()> {
-    let Some(roles) = member.roles(ctx) else {
-        ephemeral_message(ctx, "This person has no roles.").await?;
-        return Ok(())
-    };
-    let mut removed_role = false;
+pub async fn uncolor(ctx: Context<'_>, member: Member) -> Result<()> {
+    let member_id = member.user.id;
+    let roles_were_removed = remove_unused_color_roles(ctx, &mut Cow::Owned(member)).await?;
 
-    for role in roles.iter() {
-        if !role.name.starts_with('#') {
-            continue;
-        }
-        member.remove_role(ctx, role.id).await?;
-        removed_role = true;
-
-        if is_role_unused(ctx, role).await? {
-            role.guild_id.delete_role(ctx, role.id).await?;
-        }
-    }
-
-    if !removed_role {
+    if !roles_were_removed {
         ephemeral_message(ctx, "There were no roles to remove.").await?;
-        return Ok(());
     }
 
     ephemeral_message(
         ctx,
         format!(
             "All color roles have been removed from {}.",
-            Mention::from(member.user.id)
+            Mention::from(member_id)
         ),
     )
     .await?;
@@ -156,6 +140,27 @@ async fn is_role_unused(ctx: Context<'_>, role: &Role) -> Result<bool> {
     }
 
     Ok(true)
+}
+
+async fn remove_unused_color_roles(ctx: Context<'_>, member: &mut Cow<'_, Member>) -> Result<bool> {
+    let Some(roles) = member.roles(ctx) else {
+        return Ok(false)
+    };
+
+    let mut roles_were_removed = false;
+    for role in roles.iter() {
+        if !role.name.starts_with('#') {
+            continue;
+        }
+        member.to_mut().remove_role(ctx, role.id).await?;
+        roles_were_removed = true;
+
+        if is_role_unused(ctx, role).await? {
+            role.guild_id.delete_role(ctx, role.id).await?;
+        }
+    }
+
+    Ok(roles_were_removed)
 }
 
 fn generate_random_hex_color() -> u32 {
