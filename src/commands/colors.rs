@@ -37,17 +37,17 @@ async fn change(ctx: Context<'_>, hexcode: String) -> Result<()> {
         return Ok(())
     };
 
-    let Some(author_member) = ctx.author_member().await else {
+    let Some(member) = ctx.author_member().await else {
         ephemeral_message(ctx, "I could not find your roles.").await?;
         return Ok(());
     };
 
-    if let Some(reason) = reject_non_subs(&author_member).await {
+    if let Some(reason) = reject_non_subs(&member).await {
         ephemeral_message(ctx, reason).await?;
         return Ok(());
     }
 
-    let role_name = match change_color(ctx, author_member, Some(color)).await {
+    let role_name = match change_color(ctx, member, Some(color)).await {
         Ok(name) => name,
         Err(e) => {
             eprintln!("Error while trying to change color: {e}");
@@ -72,17 +72,17 @@ async fn random(ctx: Context<'_>) -> Result<()> {
         return Ok(());
     }
 
-    let Some(author) = ctx.author_member().await else {
+    let Some(member) = ctx.author_member().await else {
         ephemeral_message(ctx, "I could not find your roles.").await?;
         return Ok(())
     };
 
-    if let Some(reason) = reject_non_subs(&author).await {
+    if let Some(reason) = reject_non_subs(&member).await {
         ephemeral_message(ctx, reason).await?;
         return Ok(());
     }
 
-    let role_result = change_color(ctx, author, None).await;
+    let role_result = change_color(ctx, member, None).await;
     if let Err(e) = role_result {
         eprintln!("Error while trying to change to a random color: {e}");
         ephemeral_message(
