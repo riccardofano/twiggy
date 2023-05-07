@@ -6,7 +6,7 @@ use poise::serenity_prelude::{Member, Mention, Mutex, Role};
 use rand::Rng;
 use sqlx::SqlitePool;
 
-use crate::{common::ephemeral_message, Context, Result};
+use crate::{common::ephemeral_message, Context, Result, SUB_ROLE};
 
 // These commands were originally made in american english so I'm keeping them
 // that way, there won't be any `ou`s in this module.
@@ -27,7 +27,7 @@ pub async fn color(_ctx: Context<'_>) -> Result<()> {
 
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn change(ctx: Context<'_>, hexcode: String) -> Result<()> {
-    if let Some(reason) = is_on_cooldown(ctx).await? {
+    if let Some(reason) = reject_on_cooldown(ctx).await? {
         ephemeral_message(ctx, reason).await?;
         return Ok(());
     }
@@ -41,6 +41,11 @@ async fn change(ctx: Context<'_>, hexcode: String) -> Result<()> {
         ephemeral_message(ctx, "I could not find your roles.").await?;
         return Ok(());
     };
+
+    if let Some(reason) = reject_non_subs(&author_member).await {
+        ephemeral_message(ctx, reason).await?;
+        return Ok(());
+    }
 
     let role_name = match change_color(ctx, author_member, Some(color)).await {
         Ok(name) => name,
@@ -62,7 +67,7 @@ async fn change(ctx: Context<'_>, hexcode: String) -> Result<()> {
 
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn random(ctx: Context<'_>) -> Result<()> {
-    if let Some(reason) = is_on_cooldown(ctx).await? {
+    if let Some(reason) = reject_on_cooldown(ctx).await? {
         ephemeral_message(ctx, reason).await?;
         return Ok(());
     }
@@ -71,6 +76,11 @@ async fn random(ctx: Context<'_>) -> Result<()> {
         ephemeral_message(ctx, "I could not find your roles.").await?;
         return Ok(())
     };
+
+    if let Some(reason) = reject_non_subs(&author).await {
+        ephemeral_message(ctx, reason).await?;
+        return Ok(());
+    }
 
     let role_result = change_color(ctx, author, None).await;
     if let Err(e) = role_result {
@@ -95,7 +105,7 @@ async fn random(ctx: Context<'_>) -> Result<()> {
 
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn gamble(ctx: Context<'_>) -> Result<()> {
-    if let Some(reason) = is_on_cooldown(ctx).await? {
+    if let Some(reason) = reject_on_cooldown(ctx).await? {
         ephemeral_message(ctx, reason).await?;
         return Ok(());
     }
@@ -104,6 +114,11 @@ async fn gamble(ctx: Context<'_>) -> Result<()> {
         ephemeral_message(ctx, "I could not find your roles").await?;
         return Ok(())
     };
+
+    if let Some(reason) = reject_non_subs(&member).await {
+        ephemeral_message(ctx, reason).await?;
+        return Ok(());
+    }
 
     let custom_data = ctx.parent_commands()[0]
         .custom_data
@@ -195,7 +210,17 @@ pub async fn favorite(ctx: Context<'_>, hexcode: String) -> Result<()> {
 
 #[poise::command(guild_only, slash_command, prefix_command)]
 pub async fn lazy(ctx: Context<'_>) -> Result<()> {
-    if let Some(reason) = is_on_cooldown(ctx).await? {
+    if let Some(reason) = reject_on_cooldown(ctx).await? {
+        ephemeral_message(ctx, reason).await?;
+        return Ok(());
+    }
+
+    let Some(member) = ctx.author_member().await else {
+        ephemeral_message(ctx, "Could not find your roles").await?;
+        return Ok(());
+    };
+
+    if let Some(reason) = reject_non_subs(&member).await {
         ephemeral_message(ctx, reason).await?;
         return Ok(());
     }
@@ -363,7 +388,7 @@ struct UserCooldowns {
     last_loss: NaiveDateTime,
 }
 
-async fn is_on_cooldown(ctx: Context<'_>) -> Result<Option<String>> {
+async fn reject_on_cooldown(ctx: Context<'_>) -> Result<Option<String>> {
     let user_id = ctx.author().id.to_string();
     let row = sqlx::query_as!(
         UserCooldowns,
@@ -396,4 +421,12 @@ async fn is_on_cooldown(ctx: Context<'_>) -> Result<Option<String>> {
     }
 
     Ok(None)
+}
+
+async fn reject_non_subs(member: &Member) -> Option<String> {
+    if !member.roles.contains(&SUB_ROLE.into()) {
+        return Some("Yay! You get to keep your white color!".to_string());
+    }
+
+    None
 }
