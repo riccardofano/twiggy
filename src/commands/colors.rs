@@ -25,8 +25,12 @@ pub async fn color(_ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Change your display color
 #[poise::command(guild_only, slash_command, prefix_command)]
-async fn change(ctx: Context<'_>, hexcode: String) -> Result<()> {
+async fn change(
+    ctx: Context<'_>,
+    #[description = "The 6 digit hex color to change to"] hexcode: String,
+) -> Result<()> {
     if let Some(reason) = reject_on_cooldown(ctx).await? {
         ephemeral_message(ctx, reason).await?;
         return Ok(());
@@ -65,6 +69,7 @@ async fn change(ctx: Context<'_>, hexcode: String) -> Result<()> {
     Ok(())
 }
 
+/// Randomize your display color
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn random(ctx: Context<'_>) -> Result<()> {
     if let Some(reason) = reject_on_cooldown(ctx).await? {
@@ -103,6 +108,7 @@ async fn random(ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Tempt the Wheel of Fate for a new color... or not!
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn gamble(ctx: Context<'_>) -> Result<()> {
     if let Some(reason) = reject_on_cooldown(ctx).await? {
@@ -180,8 +186,12 @@ async fn change_color(
     Ok(role_name)
 }
 
+/// Change your favourite display color
 #[poise::command(guild_only, slash_command, prefix_command)]
-pub async fn favorite(ctx: Context<'_>, hexcode: String) -> Result<()> {
+pub async fn favorite(
+    ctx: Context<'_>,
+    #[description = "The 6 digit hex color to change to"] hexcode: String,
+) -> Result<()> {
     let Some(color) = to_color(&hexcode) else {
         ephemeral_message(ctx, "Please provide a valid hex color code.").await?;
         return Ok(())
@@ -208,6 +218,7 @@ pub async fn favorite(ctx: Context<'_>, hexcode: String) -> Result<()> {
     Ok(())
 }
 
+/// Revert your color your favorite one
 #[poise::command(guild_only, slash_command, prefix_command)]
 pub async fn lazy(ctx: Context<'_>) -> Result<()> {
     if let Some(reason) = reject_on_cooldown(ctx).await? {
@@ -272,13 +283,17 @@ pub async fn lazy(ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Remove a member's display color
 #[poise::command(
     guild_only,
     slash_command,
     prefix_command,
     required_permissions = "MODERATE_MEMBERS"
 )]
-pub async fn uncolor(ctx: Context<'_>, member: Member) -> Result<()> {
+pub async fn uncolor(
+    ctx: Context<'_>,
+    #[description = "The member whose color you want to remove"] member: Member,
+) -> Result<()> {
     let member_id = member.user.id;
     let roles_were_removed = remove_unused_color_roles(ctx, &mut Cow::Owned(member)).await?;
 
@@ -298,13 +313,17 @@ pub async fn uncolor(ctx: Context<'_>, member: Member) -> Result<()> {
     Ok(())
 }
 
+/// Update the gamble percentage chance
 #[poise::command(
     guild_only,
     slash_command,
     prefix_command,
     required_permissions = "ADMINISTRATOR"
 )]
-async fn setgamblechance(ctx: Context<'_>, percent: u8) -> Result<()> {
+async fn setgamblechance(
+    ctx: Context<'_>,
+    #[description = "Gamble chance percentage"] percent: u8,
+) -> Result<()> {
     if !(0..=100).contains(&percent) {
         ephemeral_message(ctx, "Please provide a number between 0 and 100").await?;
         return Ok(());
