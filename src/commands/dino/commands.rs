@@ -17,7 +17,7 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::{
     common::{avatar_url, ephemeral_message, name as get_name, pick_best_x_dice_rolls},
-    Context, Result, SUB_ROLE,
+    Context, Result, SUB_ROLE_ID,
 };
 
 #[derive(Default)]
@@ -114,7 +114,7 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     if guild_id.is_some()
         && ctx
             .author()
-            .has_role(ctx, guild_id.unwrap(), SUB_ROLE)
+            .has_role(ctx, guild_id.unwrap(), SUB_ROLE_ID)
             .await?
     {
         hatch_roll = hatch_roll.max(pick_best_x_dice_rolls(4, 1, 1, None) as i64);

@@ -6,7 +6,7 @@ use poise::serenity_prelude::{Member, Mention, Mutex, Role};
 use rand::Rng;
 use sqlx::SqlitePool;
 
-use crate::{common::ephemeral_message, Context, Result, SUB_ROLE};
+use crate::{common::ephemeral_message, Context, Result, SUB_ROLE_ID};
 
 // These commands were originally made in american english so I'm keeping them
 // that way, there won't be any `ou`s in this module.
@@ -14,7 +14,7 @@ use crate::{common::ephemeral_message, Context, Result, SUB_ROLE};
 const DEFAULT_GAMBLE_FAIL_CHANCE: u8 = 15;
 const RANDOM_COLOR_COOLDOWN: Duration = Duration::from_secs(60 * 60);
 
-const ANCHOR_ROLE_ID: u64 = 930791790490030100;
+const ANCHOR_ROLE_ID: u64 = SUB_ROLE_ID;
 
 #[poise::command(
     guild_only,
@@ -453,7 +453,7 @@ async fn reject_on_cooldown(ctx: Context<'_>) -> Result<Option<String>> {
 }
 
 async fn reject_non_subs(member: &Member) -> Option<String> {
-    if !member.roles.contains(&SUB_ROLE.into()) {
+    if !member.roles.contains(&SUB_ROLE_ID.into()) {
         return Some("Yay! You get to keep your white color!".to_string());
     }
 
