@@ -14,6 +14,8 @@ use crate::{common::ephemeral_message, Context, Result, SUB_ROLE};
 const DEFAULT_GAMBLE_FAIL_CHANCE: u8 = 15;
 const RANDOM_COLOR_COOLDOWN: Duration = Duration::from_secs(60 * 60);
 
+const ANCHOR_ROLE_ID: u64 = 930791790490030100;
+
 #[poise::command(
     guild_only,
     slash_command,
@@ -175,8 +177,16 @@ async fn change_color(
     let role = match guild.role_by_name(&role_name) {
         Some(role) => role.clone(),
         None => {
+            let Some(anchor_role) = guild.roles.get(&ANCHOR_ROLE_ID.into()) else {
+                return Err(anyhow::anyhow!("The anchor role was not found, \
+                unable to create a role with at the correct position."))
+            };
             guild
-                .create_role(ctx, |role| role.name(&role_name).colour(color as u64))
+                .create_role(ctx, |role| {
+                    role.name(&role_name)
+                        .colour(color as u64)
+                        .position(anchor_role.position as u8 + 1)
+                })
                 .await?
         }
     };
