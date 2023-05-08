@@ -4,8 +4,12 @@ use rand::Rng;
 use crate::common::{ephemeral_message, name};
 use crate::{Context, Result};
 
+/// Commit sudoku
 #[poise::command(guild_only, slash_command, prefix_command)]
-pub async fn sudoku(ctx: Context<'_>, message: Option<String>) -> Result<()> {
+pub async fn sudoku(
+    ctx: Context<'_>,
+    #[description = "Your final words"] message: Option<String>,
+) -> Result<()> {
     let Some(guild) = ctx.guild() else {
         ephemeral_message(ctx, "Could not find the guild you're in.").await?;
         return Ok(());
