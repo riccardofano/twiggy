@@ -38,6 +38,7 @@ async fn main() {
                 dino(),
                 color(),
                 uncolor(),
+                sudoku(),
             ],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some(String::from(">")),
