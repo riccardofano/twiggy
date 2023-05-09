@@ -21,6 +21,7 @@ struct DuelData {
     in_progress: bool,
 }
 
+/// Challenge the chat to a duel
 #[poise::command(
     slash_command,
     guild_only,
