@@ -210,7 +210,7 @@ async fn fetch_transaction(
         dino_id,
         user_id
     )
-    .fetch_optional(&mut *conn)
+    .fetch_optional(conn)
     .await?;
 
     Ok(row.map(|r| r.id))
@@ -218,7 +218,7 @@ async fn fetch_transaction(
 
 async fn delete_transaction(conn: &mut SqliteConnection, transaction_id: i64) -> Result<()> {
     sqlx::query!("DELETE FROM DinoTransactions WHERE id = ?", transaction_id)
-        .execute(&mut *conn)
+        .execute(conn)
         .await?;
 
     Ok(())
@@ -237,7 +237,7 @@ async fn create_transaction(
         dino_id,
         transaction_type
     )
-    .execute(&mut *conn)
+    .execute(conn)
     .await?;
 
     Ok(())
@@ -276,7 +276,7 @@ async fn update_dino_score(
         hotness,
         dino_id
     )
-    .execute(&mut *conn)
+    .execute(conn)
     .await?;
 
     Ok(())
@@ -287,7 +287,7 @@ async fn fetch_dino_names(
     dino_id: i64,
 ) -> Result<Option<(String, String)>> {
     let row = sqlx::query!("SELECT name, filename FROM Dino WHERE id = ?", dino_id)
-        .fetch_optional(&mut *conn)
+        .fetch_optional(conn)
         .await?;
 
     Ok(row.map(|r| (r.name, r.filename)))

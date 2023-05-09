@@ -272,7 +272,7 @@ async fn get_last_loss(conn: &mut SqliteConnection, user_id: String) -> Result<N
         user_id,
         user_id
     )
-    .fetch_one(&mut *conn)
+    .fetch_one(conn)
     .await?;
 
     Ok(row.last_loss)
@@ -283,7 +283,7 @@ async fn update_last_loss(conn: &mut SqliteConnection, user_id: String) -> Resul
         "UPDATE User SET last_loss = datetime('now') WHERE id = ?",
         user_id
     )
-    .execute(&mut *conn)
+    .execute(conn)
     .await?;
 
     Ok(())
@@ -320,7 +320,7 @@ async fn update_user_score(
         "); UPDATE Duels SET {update_query} WHERE user_id = "
     ));
     query.push_bind(&user_id);
-    query.build().execute(&mut *conn).await?;
+    query.build().execute(conn).await?;
 
     Ok(())
 }
@@ -343,7 +343,7 @@ async fn get_duel_stats(conn: &mut SqliteConnection, user_id: String) -> Result<
         r#"SELECT * FROM Duels WHERE user_id = ?"#,
         user_id
     )
-    .fetch_optional(&mut *conn)
+    .fetch_optional(conn)
     .await?;
 
     Ok(stats)

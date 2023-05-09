@@ -427,7 +427,7 @@ async fn get_character_stats(
         user_id,
         user_id
     )
-    .fetch_one(&mut *conn)
+    .fetch_one(conn)
     .await?;
 
     Ok(row)
@@ -486,7 +486,7 @@ async fn update_character_stats(
     query.push(" WHERE user_id = ");
     query.push_bind(&user_id);
 
-    query.build().execute(&mut *conn).await?;
+    query.build().execute(conn).await?;
 
     Ok(new_elo)
 }
@@ -501,7 +501,7 @@ async fn new_fight_record(
         message_id,
         log
     )
-    .execute(&mut *conn)
+    .execute(conn)
     .await?;
 
     Ok(())
