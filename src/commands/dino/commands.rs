@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     fs,
     io::Cursor,
     path::{Path, PathBuf},
@@ -80,7 +81,7 @@ fn setup_dinos() -> RwLock<Fragments> {
 #[poise::command(
     slash_command,
     guild_only,
-    subcommands("hatch", "collection", "rename", "view", "gift", "slurp"),
+    subcommands("hatch", "collection", "rename", "view", "gift", "slurp", "slurpening"),
     custom_data = "setup_dinos()"
 )]
 pub async fn dino(_ctx: Context<'_>) -> Result<()> {
@@ -146,7 +147,7 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
         .expect("Expected to have passed a Fragments struct as custom_data");
 
     let fragments = custom_data_lock.read().await;
-    let parts = generate_dino(&ctx.data().database, fragments).await?;
+    let parts = generate_dino(&ctx.data().database, &fragments).await?;
 
     if parts.is_none() {
         ephemeral_message(
@@ -484,7 +485,7 @@ async fn slurp(
         .expect("Expected to have passed a Fragments struct as custom_data");
 
     let fragments = custom_data_lock.read().await;
-    let parts = generate_dino(&ctx.data().database, fragments).await?;
+    let parts = generate_dino(&ctx.data().database, &fragments).await?;
 
     if parts.is_none() {
         ephemeral_message(
@@ -520,6 +521,121 @@ async fn slurp(
 
     transaction.commit().await?;
 
+    Ok(())
+}
+
+/// Sacrifice all your non favourite dinos to create new ones (2 -> 1)
+#[poise::command(guild_only, slash_command, prefix_command)]
+async fn slurpening(ctx: Context<'_>) -> Result<()> {
+    let user_id = ctx.author().id.to_string();
+    let mut sacrifices = get_non_favourites(&ctx.data().database, &user_id).await?;
+
+    if sacrifices.len() < 2 {
+        let content = "You don't have enough trash dinos to slurp, the minimum is 2.";
+        ephemeral_message(ctx, content).await?;
+        return Ok(());
+    }
+
+    if sacrifices.len() % 2 == 1 {
+        sacrifices.pop();
+    }
+
+    let num_to_sacrifice = sacrifices.len();
+    let num_to_create = num_to_sacrifice / 2;
+    let dinos_at_risk: String = sacrifices
+        .iter()
+        .map(|d| d.name.as_ref())
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let content = format!(
+        "You're about to sacrifice {} dinos to create {} new ones.\n\
+        Remember their names: {}.\n\
+        Are you SURE you want to do this?",
+        num_to_sacrifice, num_to_create, dinos_at_risk
+    );
+    let mut row = CreateActionRow::default();
+    row.create_button(|b| {
+        b.custom_id("slurpening-confirm")
+            .emoji('🔪')
+            .label("I AM 100% SURE".to_string())
+            .style(ButtonStyle::Danger)
+    });
+
+    let reply_handle = ctx
+        .send(|message| {
+            message
+                .components(|c| c.add_action_row(row))
+                .content(content)
+                .ephemeral(true)
+        })
+        .await?;
+
+    while let Some(interaction) = reply_handle
+        .message()
+        .await?
+        .await_component_interaction(ctx)
+        .timeout(Duration::from_secs(10))
+        .collect_limit(1)
+        .await
+    {
+        if interaction.data.custom_id != "slurpening-confirm" {
+            continue;
+        }
+
+        let custom_data_lock = ctx.parent_commands()[0]
+            .custom_data
+            .downcast_ref::<RwLock<Fragments>>()
+            .expect("Expected to have passed a Fragments struct as custom_data");
+        let fragments = custom_data_lock.read().await;
+
+        let mut transaction = ctx.data().database.begin().await?;
+        for dino in sacrifices.iter() {
+            delete_dino(&mut transaction, dino.id).await?;
+        }
+
+        let mut created_dinos = Vec::with_capacity(num_to_create);
+        for _ in 0..num_to_create {
+            let Some(parts) = generate_dino(&ctx.data().database, &fragments).await? else {
+                interaction.create_interaction_response(ctx, |response|
+                    response.interaction_response_data(|data|
+                        data.content("Sorry but I couldn't generate a dino. Aborting slurpening.")
+                        .ephemeral(true)
+                    )
+                ).await?;
+                return Ok(())
+            };
+
+            let file_path = generate_dino_image(&parts)?;
+            let inserted_dino = insert_dino(&mut transaction, &user_id, &parts, &file_path).await?;
+            created_dinos.push(inserted_dino);
+        }
+
+        let image = generate_dino_collection_image(&created_dinos)?;
+        let filename = format!("{}_collection.png", user_id);
+
+        interaction
+            .create_interaction_response(ctx, |response| {
+                response.interaction_response_data(|data| {
+                    data.embed(|embed| embed.colour(0xffbf00).attachment(&filename))
+                        .add_file(AttachmentType::Bytes {
+                            data: Cow::Owned(image),
+                            filename,
+                        })
+                })
+            })
+            .await?;
+
+        return Ok(());
+    }
+
+    reply_handle
+        .edit(ctx, |message| {
+            message
+                .components(|c| c)
+                .content("Looks like you decided to hold off for now.")
+        })
+        .await?;
     Ok(())
 }
 
@@ -559,12 +675,12 @@ async fn update_last_user_action(
 
 async fn generate_dino(
     db: &SqlitePool,
-    fragments: RwLockReadGuard<'_, Fragments>,
+    fragments: &RwLockReadGuard<'_, Fragments>,
 ) -> Result<Option<DinoParts>> {
     let mut tries = 0;
 
     loop {
-        let mut generated = choose_parts(&fragments);
+        let mut generated = choose_parts(fragments);
         let duplicate_parts = are_parts_duplicate(db, &generated).await?;
 
         if !duplicate_parts {
@@ -986,6 +1102,23 @@ async fn delete_dino(conn: &mut SqliteConnection, dino_id: i64) -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn get_non_favourites(db: &SqlitePool, user_id: &str) -> Result<Vec<DinoRecord>> {
+    let rows = sqlx::query_as!(
+        DinoRecord,
+        r#"INSERT OR IGNORE INTO DinoUser (id) VALUES (?);
+        SELECT * FROM Dino
+        WHERE owner_id = ?
+        AND Dino.id NOT IN
+        (SELECT dino_id FROM DinoTransactions WHERE type = 'FAVOURITE')"#,
+        user_id,
+        user_id
+    )
+    .fetch_all(db)
+    .await?;
+
+    Ok(rows)
 }
 
 async fn autocomplete_owned_dinos<'a>(
