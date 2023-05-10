@@ -417,6 +417,8 @@ struct UserCooldowns {
     last_loss: NaiveDateTime,
 }
 
+/// Checks if the user is currently on cooldown, if so returns the reason why
+/// they were rejected.
 async fn reject_on_cooldown(ctx: Context<'_>) -> Result<Option<String>> {
     let user_id = ctx.author().id.to_string();
     let row = sqlx::query_as!(
@@ -452,6 +454,8 @@ async fn reject_on_cooldown(ctx: Context<'_>) -> Result<Option<String>> {
     Ok(None)
 }
 
+/// Checks if the member is a subscriber, if they weren't returns the reason why
+/// they were rejected.
 async fn reject_non_subs(member: &Member) -> Option<String> {
     if !member.roles.contains(&SUB_ROLE_ID.into()) {
         return Some("Yay! You get to keep your white color!".to_string());
