@@ -528,6 +528,24 @@ async fn slurp(
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn slurpening(ctx: Context<'_>) -> Result<()> {
     let user_id = ctx.author().id.to_string();
+    let user_record = get_user_record(&ctx.data().database, &user_id).await?;
+
+    let now = Utc::now().naive_utc();
+    let slurp_cooldown_duration = chrono::Duration::from_std(SLURP_COOLDOWN)?;
+    let time_until_next_slurp = user_record.last_slurp + slurp_cooldown_duration;
+
+    if time_until_next_slurp > now {
+        ephemeral_message(
+            ctx,
+            format!(
+                "Don't be greedy! You can slurp again <t:{}:R>",
+                time_until_next_slurp.timestamp()
+            ),
+        )
+        .await?;
+        return Ok(());
+    }
+
     let mut sacrifices = get_non_favourites(&ctx.data().database, &user_id).await?;
 
     if sacrifices.len() < 2 {
@@ -646,6 +664,7 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
 
         // TODO: update dino hatch message url
 
+        update_last_user_action(&mut transaction, &user_id, UserAction::Slurp).await?;
         transaction.commit().await?;
 
         return Ok(());
