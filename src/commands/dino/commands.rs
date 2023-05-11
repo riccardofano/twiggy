@@ -614,17 +614,39 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
         let image = generate_dino_collection_image(&created_dinos)?;
         let filename = format!("{}_collection.png", user_id);
 
+        let author_name = get_name(ctx.author(), &ctx).await;
+        let author_avatar = avatar_url(ctx.author());
+
+        let new_dino_names = created_dinos
+            .iter()
+            .map(|d| d.name.as_ref())
+            .collect::<Vec<_>>()
+            .join(", ");
+
         interaction
             .create_interaction_response(ctx, |response| {
                 response.interaction_response_data(|data| {
-                    data.embed(|embed| embed.colour(0xffbf00).attachment(&filename))
-                        .add_file(AttachmentType::Bytes {
-                            data: Cow::Owned(image),
-                            filename,
-                        })
+                    data.embed(|embed| {
+                        embed
+                            .colour(0xffbf00)
+                            .author(|a| a.name(&author_name).icon_url(author_avatar))
+                            .title(format!("{}'s babies", &author_name))
+                            .description(format!(
+                                "{num_to_create} dinos came out: {new_dino_names}."
+                            ))
+                            .attachment(&filename)
+                    })
+                    .add_file(AttachmentType::Bytes {
+                        data: Cow::Owned(image),
+                        filename,
+                    })
                 })
             })
             .await?;
+
+        // TODO: update dino hatch message url
+
+        transaction.commit().await?;
 
         return Ok(());
     }
