@@ -1152,7 +1152,7 @@ async fn get_non_favourites(db: &SqlitePool, user_id: &str) -> Result<Vec<DinoRe
         SELECT * FROM Dino
         WHERE owner_id = ?
         AND Dino.id NOT IN
-        (SELECT dino_id FROM DinoTransactions WHERE type = 'FAVOURITE')"#,
+        (SELECT dino_id FROM DinoTransactions WHERE type = 'FAVOURITE') LIMIT 50"#,
         user_id,
         user_id
     )
