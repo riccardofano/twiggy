@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::time::Duration;
 
+use anyhow::Context as Ctx;
 use chrono::{NaiveDateTime, Utc};
 use poise::serenity_prelude::{Member, Mention, Mutex, Role};
 use rand::Rng;
@@ -33,8 +34,8 @@ async fn change(
     ctx: Context<'_>,
     #[description = "The 6 digit hex color to change to"] hexcode: String,
 ) -> Result<()> {
-    if let Some(reason) = reject_on_cooldown(ctx).await? {
-        ephemeral_message(ctx, reason).await?;
+    if let Err(reason) = reject_on_cooldown(ctx).await {
+        ephemeral_message(ctx, reason.to_string()).await?;
         return Ok(());
     }
 
@@ -48,8 +49,8 @@ async fn change(
         return Ok(());
     };
 
-    if let Some(reason) = reject_non_subs(&member).await {
-        ephemeral_message(ctx, reason).await?;
+    if let Err(reason) = reject_non_subs(&member).await {
+        ephemeral_message(ctx, reason.to_string()).await?;
         return Ok(());
     }
 
@@ -74,8 +75,8 @@ async fn change(
 /// Randomize your display color
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn random(ctx: Context<'_>) -> Result<()> {
-    if let Some(reason) = reject_on_cooldown(ctx).await? {
-        ephemeral_message(ctx, reason).await?;
+    if let Err(reason) = reject_on_cooldown(ctx).await {
+        ephemeral_message(ctx, reason.to_string()).await?;
         return Ok(());
     }
 
@@ -84,8 +85,8 @@ async fn random(ctx: Context<'_>) -> Result<()> {
         return Ok(())
     };
 
-    if let Some(reason) = reject_non_subs(&member).await {
-        ephemeral_message(ctx, reason).await?;
+    if let Err(reason) = reject_non_subs(&member).await {
+        ephemeral_message(ctx, reason.to_string()).await?;
         return Ok(());
     }
 
@@ -113,8 +114,8 @@ async fn random(ctx: Context<'_>) -> Result<()> {
 /// Tempt the Wheel of Fate for a new color... or not!
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn gamble(ctx: Context<'_>) -> Result<()> {
-    if let Some(reason) = reject_on_cooldown(ctx).await? {
-        ephemeral_message(ctx, reason).await?;
+    if let Err(reason) = reject_on_cooldown(ctx).await {
+        ephemeral_message(ctx, reason.to_string()).await?;
         return Ok(());
     }
 
@@ -123,8 +124,8 @@ async fn gamble(ctx: Context<'_>) -> Result<()> {
         return Ok(())
     };
 
-    if let Some(reason) = reject_non_subs(&member).await {
-        ephemeral_message(ctx, reason).await?;
+    if let Err(reason) = reject_non_subs(&member).await {
+        ephemeral_message(ctx, reason.to_string()).await?;
         return Ok(());
     }
 
@@ -231,8 +232,8 @@ pub async fn favorite(
 /// Revert your color your favorite one
 #[poise::command(guild_only, slash_command, prefix_command)]
 pub async fn lazy(ctx: Context<'_>) -> Result<()> {
-    if let Some(reason) = reject_on_cooldown(ctx).await? {
-        ephemeral_message(ctx, reason).await?;
+    if let Err(reason) = reject_on_cooldown(ctx).await {
+        ephemeral_message(ctx, reason.to_string()).await?;
         return Ok(());
     }
 
@@ -241,8 +242,8 @@ pub async fn lazy(ctx: Context<'_>) -> Result<()> {
         return Ok(());
     };
 
-    if let Some(reason) = reject_non_subs(&member).await {
-        ephemeral_message(ctx, reason).await?;
+    if let Err(reason) = reject_non_subs(&member).await {
+        ephemeral_message(ctx, reason.to_string()).await?;
         return Ok(());
     }
 
@@ -417,9 +418,7 @@ struct UserCooldowns {
     last_loss: NaiveDateTime,
 }
 
-/// Checks if the user is currently on cooldown, if so returns the reason why
-/// they were rejected.
-async fn reject_on_cooldown(ctx: Context<'_>) -> Result<Option<String>> {
+async fn reject_on_cooldown(ctx: Context<'_>) -> Result<()> {
     let user_id = ctx.author().id.to_string();
     let row = sqlx::query_as!(
         UserCooldowns,
@@ -429,7 +428,8 @@ async fn reject_on_cooldown(ctx: Context<'_>) -> Result<Option<String>> {
         user_id
     )
     .fetch_one(&ctx.data().database)
-    .await?;
+    .await
+    .context("Something went wrong while trying to fetch your cooldowns")?;
 
     let now = Utc::now().naive_utc();
     let cooldown_duration = chrono::Duration::from_std(RANDOM_COLOR_COOLDOWN)?;
@@ -438,28 +438,26 @@ async fn reject_on_cooldown(ctx: Context<'_>) -> Result<Option<String>> {
     let permitted_time_from_loss = row.last_loss + cooldown_duration;
 
     if permitted_time_from_random > now {
-        return Ok(Some(format!(
+        return Err(anyhow::anyhow!(
             "You recently randomed/gambled, you can change your color <t:{}:R>",
             permitted_time_from_random.timestamp()
-        )));
+        ));
     }
 
     if permitted_time_from_loss > now {
-        return Ok(Some(format!(
+        return Err(anyhow::anyhow!(
             "You recently dueled and lost, you can change your color <t:{}:R>",
             permitted_time_from_loss.timestamp()
-        )));
+        ));
     }
 
-    Ok(None)
+    Ok(())
 }
 
-/// Checks if the member is a subscriber, if they weren't returns the reason why
-/// they were rejected.
-async fn reject_non_subs(member: &Member) -> Option<String> {
+async fn reject_non_subs(member: &Member) -> Result<()> {
     if !member.roles.contains(&SUB_ROLE_ID.into()) {
-        return Some("Yay! You get to keep your white color!".to_string());
+        return Err(anyhow::anyhow!("Yay! You get to keep your white color!"));
     }
 
-    None
+    Ok(())
 }
