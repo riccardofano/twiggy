@@ -12,9 +12,8 @@ pub async fn ephemeral_message<S: AsRef<str>>(
     ctx: Context<'_>,
     content: S,
 ) -> Result<ReplyHandle, Error> {
-    return ctx
-        .send(|message| message.content(content.as_ref()).ephemeral(true))
-        .await;
+    ctx.send(|message| message.content(content.as_ref()).ephemeral(true))
+        .await
 }
 
 pub async fn ephemeral_interaction_response<S: AsRef<str>>(
@@ -22,30 +21,30 @@ pub async fn ephemeral_interaction_response<S: AsRef<str>>(
     interaction: Arc<MessageComponentInteraction>,
     content: S,
 ) -> Result<(), Error> {
-    return interaction
+    interaction
         .create_interaction_response(&ctx, |r| {
             r.interaction_response_data(|d| d.content(content.as_ref()).ephemeral(true))
         })
-        .await;
+        .await
 }
 
 pub async fn nickname(person: &User, ctx: &Context<'_>) -> Option<String> {
     let guild_id = ctx.guild_id()?;
-    return person.nick_in(ctx, guild_id).await;
+    person.nick_in(ctx, guild_id).await
 }
 
 pub async fn name(person: &User, ctx: &Context<'_>) -> String {
-    return nickname(person, ctx)
+    nickname(person, ctx)
         .await
-        .unwrap_or_else(|| person.name.clone());
+        .unwrap_or_else(|| person.name.clone())
 }
 
 pub async fn member<'a>(ctx: &'a Context<'_>) -> Option<Cow<'a, Member>> {
-    return ctx.author_member().await;
+    ctx.author_member().await
 }
 
 pub async fn colour(ctx: &Context<'_>) -> Option<Colour> {
-    return member(ctx).await?.colour(ctx);
+    member(ctx).await?.colour(ctx)
 }
 
 pub fn avatar_url(person: &User) -> String {

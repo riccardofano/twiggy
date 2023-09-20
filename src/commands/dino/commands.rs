@@ -79,10 +79,10 @@ fn setup_dinos() -> RwLock<Fragments> {
 }
 
 #[poise::command(
-    slash_command,
-    guild_only,
-    subcommands("hatch", "collection", "rename", "view", "gift", "slurp", "slurpening"),
-    custom_data = "setup_dinos()"
+slash_command,
+guild_only,
+subcommands("hatch", "collection", "rename", "view", "gift", "slurp", "slurpening"),
+custom_data = "setup_dinos()"
 )]
 pub async fn dino(_ctx: Context<'_>) -> Result<()> {
     Ok(())
@@ -106,7 +106,7 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
                 midnight_utc_tomorrow.timestamp()
             ),
         )
-        .await?;
+            .await?;
         return Ok(());
     }
 
@@ -114,9 +114,9 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     let guild_id = ctx.guild_id();
     if guild_id.is_some()
         && ctx
-            .author()
-            .has_role(ctx, guild_id.unwrap(), SUB_ROLE_ID)
-            .await?
+        .author()
+        .has_role(ctx, guild_id.unwrap(), SUB_ROLE_ID)
+        .await?
     {
         hatch_roll = hatch_roll.max(pick_best_x_dice_rolls(4, 1, 1, None) as i64);
     }
@@ -128,7 +128,7 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
             &author_id,
             UserAction::Hatch(hatcher_record.consecutive_fails + 1),
         )
-        .await?;
+            .await?;
 
         ctx.say(format!(
             "You failed to hatch the egg ({} attempt), \
@@ -136,7 +136,7 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
             HATCH_FAILS_TEXT[hatcher_record.consecutive_fails as usize],
             midnight_utc_tomorrow.timestamp()
         ))
-        .await?;
+            .await?;
 
         return Ok(());
     }
@@ -154,7 +154,7 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
             ctx,
             "I tried really hard but i wasn't able to make a unique dino for you. Sorry... :'(",
         )
-        .await?;
+            .await?;
         return Ok(());
     }
 
@@ -163,7 +163,7 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
 
     let mut transaction = ctx.data().database.begin().await?;
 
-    let dino = insert_dino(&mut transaction, &author_id, &parts, &image_path).await?;
+    let dino = insert_dino(&mut transaction, &author_id, &parts, &image_path, None).await?;
     update_last_user_action(&mut transaction, &author_id, UserAction::Hatch(0)).await?;
 
     let author_name = get_name(ctx.author(), &ctx).await;
@@ -175,7 +175,7 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
         &image_path,
         now,
     )
-    .await?;
+        .await?;
 
     update_hatch_message(&mut transaction, dino.id, &message).await?;
 
@@ -258,7 +258,7 @@ async fn collection(
             })
             .ephemeral(silent)
     })
-    .await?;
+        .await?;
 
     Ok(())
 }
@@ -301,7 +301,7 @@ async fn rename(
             dino.name, replacement
         ),
     )
-    .await?;
+        .await?;
 
     Ok(())
 }
@@ -340,7 +340,7 @@ async fn view(
         &image_path,
         dino.created_at,
     )
-    .await?;
+        .await?;
 
     Ok(())
 }
@@ -368,12 +368,12 @@ async fn gift(
                 time_until_next_gift.timestamp()
             ),
         )
-        .await?;
+            .await?;
         return Ok(());
     }
 
     let Some(dino_record) = get_dino_record(&ctx.data().database, &dino).await? else {
-        ephemeral_message(ctx, format!( "Could not find a dino named {dino}.")).await?;
+        ephemeral_message(ctx, format!("Could not find a dino named {dino}.")).await?;
         return Ok(());
     };
 
@@ -391,7 +391,7 @@ async fn gift(
         &author_id,
         &recipient.id.to_string(),
     )
-    .await?;
+        .await?;
     update_last_user_action(&mut transaction, &author_id, UserAction::Gift).await?;
 
     let sender_name = get_name(ctx.author(), &ctx).await;
@@ -409,7 +409,7 @@ async fn gift(
             ))
         })
     })
-    .await?;
+        .await?;
 
     transaction.commit().await?;
 
@@ -446,7 +446,7 @@ async fn slurp(
                 time_until_next_slurp.timestamp()
             ),
         )
-        .await?;
+            .await?;
         return Ok(());
     }
 
@@ -462,7 +462,7 @@ async fn slurp(
             ctx,
             &format!("Doesn't seem you own {first}, are you trying to pull a fast one on me?!"),
         )
-        .await?;
+            .await?;
         return Ok(());
     }
 
@@ -476,7 +476,7 @@ async fn slurp(
             ctx,
             &format!("Doesn't seem you own {second}, are you trying to pull a fast one on me?!"),
         )
-        .await?;
+            .await?;
         return Ok(());
     }
     let custom_data_lock = ctx.parent_commands()[0]
@@ -492,7 +492,7 @@ async fn slurp(
             ctx,
             "I tried really hard but i wasn't able to make a unique dino for you. Sorry... :'(",
         )
-        .await?;
+            .await?;
         return Ok(());
     }
 
@@ -503,7 +503,7 @@ async fn slurp(
     let parts = parts.unwrap();
     let image_path = generate_dino_image(&parts)?;
 
-    let dino = insert_dino(&mut transaction, &author_id, &parts, &image_path).await?;
+    let dino = insert_dino(&mut transaction, &author_id, &parts, &image_path, None).await?;
     update_last_user_action(&mut transaction, &author_id, UserAction::Slurp).await?;
 
     let author_name = get_name(ctx.author(), &ctx).await;
@@ -515,7 +515,7 @@ async fn slurp(
         &image_path,
         Utc::now().naive_utc(),
     )
-    .await?;
+        .await?;
 
     update_hatch_message(&mut transaction, dino.id, &message).await?;
 
@@ -542,7 +542,7 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
                 time_until_next_slurp.timestamp()
             ),
         )
-        .await?;
+            .await?;
         return Ok(());
     }
 
@@ -612,20 +612,22 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
             delete_dino(&mut transaction, dino.id).await?;
         }
 
+        let message_link = interaction.message.link();
+
         let mut created_dinos = Vec::with_capacity(num_to_create);
         for _ in 0..num_to_create {
             let Some(parts) = generate_dino(&ctx.data().database, &fragments).await? else {
                 interaction.create_interaction_response(ctx, |response|
                     response.interaction_response_data(|data|
                         data.content("Sorry but I couldn't generate a dino. Aborting slurpening.")
-                        .ephemeral(true)
-                    )
+                            .ephemeral(true)
+                    ),
                 ).await?;
-                return Ok(())
+                return Ok(());
             };
 
             let file_path = generate_dino_image(&parts)?;
-            let inserted_dino = insert_dino(&mut transaction, &user_id, &parts, &file_path).await?;
+            let inserted_dino = insert_dino(&mut transaction, &user_id, &parts, &file_path, Some(&message_link)).await?;
             created_dinos.push(inserted_dino);
         }
 
@@ -654,16 +656,15 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
                             ))
                             .attachment(&filename)
                     })
-                    .add_file(AttachmentType::Bytes {
-                        data: Cow::Owned(image),
-                        filename,
-                    })
+                        .add_file(AttachmentType::Bytes {
+                            data: Cow::Owned(image),
+                            filename,
+                        })
                 })
             })
             .await?;
 
         // TODO: update dino hatch message url
-
         update_last_user_action(&mut transaction, &user_id, UserAction::Slurp).await?;
         transaction.commit().await?;
 
@@ -754,8 +755,8 @@ async fn are_parts_duplicate(db: &SqlitePool, parts: &DinoParts) -> Result<bool>
         mouth,
         eyes
     )
-    .fetch_optional(db)
-    .await?;
+        .fetch_optional(db)
+        .await?;
 
     Ok(row.is_some())
 }
@@ -888,8 +889,8 @@ async fn get_user_record(db: &SqlitePool, user_id: &str) -> Result<UserRecord> {
         user_id,
         user_id,
     )
-    .fetch_one(db)
-    .await?;
+        .fetch_one(db)
+        .await?;
 
     Ok(row)
 }
@@ -899,11 +900,13 @@ async fn insert_dino(
     user_id: &str,
     parts: &DinoParts,
     file_path: &Path,
+    message_link: Option<&str>,
 ) -> Result<DinoRecord> {
     let body = get_file_name(&parts.body);
     let mouth = get_file_name(&parts.mouth);
     let eyes = get_file_name(&parts.eyes);
     let file_name = get_file_name(file_path);
+    let message_link = message_link.unwrap_or_default();
 
     // NOTE: `query_as!` mistakenly interprets all string type fields as
     // nullable strings (when every field is marked NOT NULL), using
@@ -911,8 +914,8 @@ async fn insert_dino(
     let row = sqlx::query_as_unchecked!(
         DinoRecord,
         r#"INSERT INTO Dino
-        (owner_id, name, filename, created_at, body, mouth, eyes)
-        VALUES (?, ?, ?, datetime('now'), ?, ?, ?)
+        (owner_id, name, filename, created_at, body, mouth, eyes, hatch_message)
+        VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?)
         RETURNING *"#,
         user_id,
         parts.name,
@@ -920,9 +923,10 @@ async fn insert_dino(
         body,
         mouth,
         eyes,
+        message_link
     )
-    .fetch_one(conn)
-    .await?;
+        .fetch_one(conn)
+        .await?;
 
     Ok(row)
 }
@@ -939,8 +943,8 @@ async fn update_hatch_message(
         message_link,
         dino_id
     )
-    .execute(conn)
-    .await?;
+        .execute(conn)
+        .await?;
 
     Ok(())
 }
@@ -1045,8 +1049,8 @@ async fn update_dino_name(db: &SqlitePool, dino_id: i64, new_name: &str) -> Resu
         new_name,
         dino_id
     )
-    .execute(db)
-    .await?;
+        .execute(db)
+        .await?;
 
     Ok(())
 }
@@ -1126,8 +1130,8 @@ async fn gift_dino(
         recipient_id,
         dino_id,
     )
-    .execute(conn)
-    .await?;
+        .execute(conn)
+        .await?;
 
     Ok(())
 }
@@ -1156,8 +1160,8 @@ async fn get_non_favourites(db: &SqlitePool, user_id: &str) -> Result<Vec<DinoRe
         user_id,
         user_id
     )
-    .fetch_all(db)
-    .await?;
+        .fetch_all(db)
+        .await?;
 
     Ok(rows)
 }
@@ -1165,7 +1169,7 @@ async fn get_non_favourites(db: &SqlitePool, user_id: &str) -> Result<Vec<DinoRe
 async fn autocomplete_owned_dinos<'a>(
     ctx: Context<'a>,
     partial: &'a str,
-) -> impl Iterator<Item = String> + 'a {
+) -> impl Iterator<Item=String> + 'a {
     let owner_id = ctx.author().id.to_string();
     let partial = format!("%{partial}%");
 
@@ -1174,12 +1178,12 @@ async fn autocomplete_owned_dinos<'a>(
         owner_id,
         partial
     )
-    .fetch_all(&ctx.data().database)
-    .await
-    .unwrap_or_else(|e| {
-        eprintln!("Error while trying to suggest autocomplete for '{partial}': {e}");
-        vec![]
-    });
+        .fetch_all(&ctx.data().database)
+        .await
+        .unwrap_or_else(|e| {
+            eprintln!("Error while trying to suggest autocomplete for '{partial}': {e}");
+            vec![]
+        });
 
     suggestions.into_iter().map(|r| r.name)
 }
@@ -1187,7 +1191,7 @@ async fn autocomplete_owned_dinos<'a>(
 async fn autocomplete_all_dinos<'a>(
     ctx: Context<'a>,
     partial: &'a str,
-) -> impl Iterator<Item = String> + 'a {
+) -> impl Iterator<Item=String> + 'a {
     let partial = format!("%{partial}%");
 
     let suggestions = sqlx::query!("SELECT name FROM Dino WHERE name LIKE ? LIMIT 5", partial)
