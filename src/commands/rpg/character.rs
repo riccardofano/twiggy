@@ -107,7 +107,7 @@ impl Character {
         self.stats[stat] / 2 - 5
     }
 
-    pub fn to_embed<'a, 'b>(&'a self, builder: &'b mut CreateEmbed) -> &'b mut CreateEmbed {
+    pub fn to_embed<'b>(&self, builder: &'b mut CreateEmbed) -> &'b mut CreateEmbed {
         builder
             .color(0x0099333)
             .title(&self.name)
