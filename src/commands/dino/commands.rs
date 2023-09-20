@@ -664,7 +664,6 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
             })
             .await?;
 
-        // TODO: update dino hatch message url
         update_last_user_action(&mut transaction, &user_id, UserAction::Slurp).await?;
         transaction.commit().await?;
 
