@@ -62,6 +62,7 @@ impl RPGFight {
         } else if self.challenger.hp == 0 {
             (FightResult::AccepterWin, &self.accepter, &self.challenger)
         } else {
+            self.summary = format!("After {MAX_ROUNDS} rounds they decide to call it a draw.");
             return FightResult::Draw;
         };
 
