@@ -208,11 +208,13 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
 
         transaction.commit().await?;
 
-        ctx.data()
-            .rpg_summary_cache
-            .lock()
-            .await
-            .insert(reply_msg.id.0, fight_log);
+        {
+            ctx.data()
+                .rpg_summary_cache
+                .lock()
+                .await
+                .put(reply_msg.id.0, fight_log);
+        }
 
         let mut summary_row = CreateActionRow::default();
         summary_row.create_button(|f| {
@@ -316,9 +318,13 @@ async fn stats(ctx: Context<'_>, user: Option<User>, silent: Option<bool>) -> Re
     let user_name = name(&user, &ctx).await;
     let character_scoresheet =
         try_get_character_scoresheet(&mut conn, &user.id.to_string()).await?;
-    let Some(user_record) =  character_scoresheet else {
-        ephemeral_message(ctx, &format!("Hmm, {user_name}... It seems you are yet to test your steel.")).await?;
-        return Ok(())
+    let Some(user_record) = character_scoresheet else {
+        ephemeral_message(
+            ctx,
+            &format!("Hmm, {user_name}... It seems you are yet to test your steel."),
+        )
+        .await?;
+        return Ok(());
     };
 
     let CharacterScoresheet {

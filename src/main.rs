@@ -1,15 +1,17 @@
 mod commands;
 mod common;
 
+use std::num::NonZeroUsize;
+
 use anyhow::Result;
 use commands::*;
+use lru::LruCache;
 use poise::serenity_prelude as serenity;
 use poise::serenity_prelude::Mutex;
-use std::collections::HashMap;
 
 pub struct Data {
     database: sqlx::SqlitePool,
-    rpg_summary_cache: Mutex<HashMap<u64, String>>,
+    rpg_summary_cache: Mutex<LruCache<u64, String>>,
 }
 pub type Context<'a> = poise::Context<'a, Data, anyhow::Error>;
 pub type Error = anyhow::Error;
@@ -60,7 +62,7 @@ async fn main() {
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                 Ok(Data {
                     database,
-                    rpg_summary_cache: Mutex::new(HashMap::new()),
+                    rpg_summary_cache: Mutex::new(LruCache::new(NonZeroUsize::new(10).unwrap())),
                 })
             })
         });
