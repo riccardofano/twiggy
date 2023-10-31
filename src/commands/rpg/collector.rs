@@ -1,5 +1,8 @@
+use std::borrow::Cow;
+
 use poise::futures_util::StreamExt;
 use poise::serenity_prelude as serenity;
+use poise::serenity_prelude::AttachmentType;
 use poise::serenity_prelude::ComponentInteractionCollectorBuilder;
 use sqlx::SqlitePool;
 
@@ -17,11 +20,8 @@ pub async fn setup_rpg_summary(ctx: &serenity::Context, user_data: &Data) -> Res
         .then(|interaction| async move {
             let mut cache = user_data.rpg_summary_cache.lock().await;
             let message_id = interaction.message.id;
-            let hashmap_log = cache.get(message_id.as_u64());
 
-            // TODO: The interaction fails if the message is too long, I should
-            // send it as a text file when that happens.
-            let response = match hashmap_log.cloned() {
+            let response = match cache.get(message_id.as_u64()).cloned() {
                 Some(log) => log,
                 None => {
                     let retrieved = retrieve_fight_record(
@@ -39,11 +39,26 @@ pub async fn setup_rpg_summary(ctx: &serenity::Context, user_data: &Data) -> Res
                 }
             };
 
-            let _result = interaction
-                .create_interaction_response(&ctx, |r| {
-                    r.interaction_response_data(|d| d.content(response).ephemeral(true))
-                })
-                .await;
+            // Discord has a 2000 character limit on messages, summaries can get
+            // quite long so if they do send them as files instead.
+            let _ = if response.len() < 2000 {
+                interaction
+                    .create_interaction_response(&ctx, |r| {
+                        r.interaction_response_data(|d| d.content(response).ephemeral(true))
+                    })
+                    .await
+            } else {
+                let file = AttachmentType::Bytes {
+                    data: Cow::Borrowed(response.as_bytes()),
+                    filename: "fight_log.md".to_string(),
+                };
+                interaction
+                    .create_interaction_response(&ctx, |r| {
+                        r.interaction_response_data(|d| d.add_file(file).ephemeral(true))
+                    })
+                    .await
+            };
+
             interaction
         })
         .collect()
