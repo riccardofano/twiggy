@@ -1,6 +1,6 @@
 use super::character::Character;
 use super::elo::{calculate_lp_difference, calculate_new_elo, LadderPosition};
-use super::fight::{FightResult, RPGFight};
+use super::fight::RPGFight;
 
 use crate::commands::rpg::elo::find_ladder_rank;
 use crate::common::{
@@ -155,27 +155,19 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
 
         let new_challenger_elo = update_character_stats(
             &mut transaction,
-            challenger.id.to_string(),
+            challenger.id.0,
             challenger_stats.elo_rank,
             accepter_stats.elo_rank,
-            match fight_result {
-                FightResult::AccepterWin => Score::Loss,
-                FightResult::ChallengerWin => Score::Win,
-                FightResult::Draw => Score::Draw,
-            },
+            fight_result.to_score(true),
         )
         .await?;
 
         let new_accepter_elo = update_character_stats(
             &mut transaction,
-            accepter.id.to_string(),
+            accepter.id.0,
             accepter_stats.elo_rank,
             challenger_stats.elo_rank,
-            match fight_result {
-                FightResult::AccepterWin => Score::Win,
-                FightResult::ChallengerWin => Score::Loss,
-                FightResult::Draw => Score::Draw,
-            },
+            fight_result.to_score(false),
         )
         .await?;
 
@@ -425,8 +417,10 @@ struct CharacterPastStats {
 
 async fn get_character_stats(
     conn: &mut SqliteConnection,
-    user_id: String,
+    user_id: u64,
 ) -> Result<CharacterPastStats> {
+    let user_id = user_id.to_string();
+
     let row = sqlx::query_as!(
         CharacterPastStats,
         r#"
@@ -471,7 +465,7 @@ async fn try_get_character_scoresheet(
 
 async fn update_character_stats(
     conn: &mut SqliteConnection,
-    user_id: String,
+    user_id: u64,
     elo_rank: i64,
     opponent_elo_rank: i64,
     outcome: Score,
@@ -493,7 +487,7 @@ async fn update_character_stats(
     query.push("), ");
     query.push(update_query);
     query.push(" WHERE user_id = ");
-    query.push_bind(&user_id);
+    query.push_bind(user_id.to_string());
 
     query.build().execute(conn).await?;
 

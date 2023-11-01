@@ -1,7 +1,7 @@
 use super::character::Character;
 use super::data::{Stat, VictoryKind};
 
-use crate::common::pick_best_x_dice_rolls;
+use crate::common::{pick_best_x_dice_rolls, Score};
 
 use rand::seq::SliceRandom;
 use std::cmp;
@@ -14,6 +14,18 @@ pub enum FightResult {
     ChallengerWin,
     AccepterWin,
     Draw,
+}
+
+impl FightResult {
+    pub fn to_score(&self, is_challenger: bool) -> Score {
+        match (self, is_challenger) {
+            (FightResult::ChallengerWin, true) => Score::Win,
+            (FightResult::ChallengerWin, false) => Score::Loss,
+            (FightResult::AccepterWin, true) => Score::Loss,
+            (FightResult::AccepterWin, false) => Score::Win,
+            _ => Score::Draw,
+        }
+    }
 }
 
 pub struct RPGFight {
