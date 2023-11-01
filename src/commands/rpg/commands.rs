@@ -172,14 +172,8 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         .await?;
 
         transaction.commit().await?;
+        update_summary_cache(ctx, reply_msg.id.0, &fight_log).await;
 
-        {
-            ctx.data()
-                .rpg_summary_cache
-                .lock()
-                .await
-                .put(reply_msg.id.0, fight_log);
-        }
         let elo_change_summary = format!(
             "**{challenger_name}**{} [{new_challenger_elo}]. \
             **{accepter_name}**{} [{new_accepter_elo}].",
@@ -243,6 +237,14 @@ fn assert_no_recent_loss(stats: &CharacterPastStats, name: &str) -> Result<()> {
 async fn retrieve_user_stats(ctx: Context<'_>, user: &User) -> Result<CharacterPastStats> {
     let mut conn = ctx.data().database.acquire().await?;
     get_character_stats(&mut conn, user.id.0).await
+}
+
+async fn update_summary_cache(ctx: Context<'_>, message_id: u64, log: &str) {
+    ctx.data()
+        .rpg_summary_cache
+        .lock()
+        .await
+        .put(message_id, log.to_string());
 }
 
 fn create_accept_button() -> CreateActionRow {
