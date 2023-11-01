@@ -39,6 +39,7 @@ struct ChallengeData {
     guild_only,
     custom_data = "RwLock::new(ChallengeData::default())"
 )]
+/// Challenge other chatters and prove your strength.
 async fn challenge(ctx: Context<'_>) -> Result<()> {
     let custom_data_lock = unwrap_custom_data(ctx);
 
