@@ -80,10 +80,7 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         })
         .await?;
 
-    {
-        let mut duel_data = custom_data_lock.write().await;
-        duel_data.in_progress = true;
-    }
+    update_in_progress_status(custom_data_lock, true).await;
 
     let reply_msg = accept_reply.message().await?;
 
@@ -137,10 +134,7 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         let mut fight = RPGFight::new(challenger_character, accepter_character);
         let fight_result = fight.fight();
 
-        {
-            let mut cmd_data = custom_data_lock.write().await;
-            cmd_data.in_progress = false;
-        }
+        update_in_progress_status(custom_data_lock, false).await;
 
         let mut conn = ctx.data().database.acquire().await?;
         let mut transaction = conn.begin().await?;
@@ -208,8 +202,14 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         })
         .await?;
 
+    update_in_progress_status(custom_data_lock, false).await;
 
     Ok(())
+}
+
+async fn update_in_progress_status(custom_data_lock: &RwLock<ChallengeData>, new_status: bool) {
+    let mut cmd_data = custom_data_lock.write().await;
+    cmd_data.in_progress = new_status;
 }
 
 fn unwrap_custom_data(ctx: Context<'_>) -> &RwLock<ChallengeData> {
