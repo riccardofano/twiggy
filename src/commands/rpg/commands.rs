@@ -51,16 +51,12 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
     let challenger_nick = nickname(challenger, &ctx).await;
     let challenger_name = challenger_nick.as_deref().unwrap_or(&challenger.name);
 
-    let challenger_stats = {
-        let mut conn = ctx.data().database.acquire().await?;
-        match get_character_stats(&mut conn, challenger.id.to_string()).await {
-            Ok(stats) => stats,
-            Err(e) => {
-                eprintln!("Could not retrieve {}'s last loss: {e:?}", challenger.name);
-                ephemeral_message(ctx, "Something went wrong when trying to join the fight.")
-                    .await?;
-                return Ok(());
-            }
+    let challenger_stats = match retrieve_user_stats(ctx, challenger).await {
+        Ok(stats) => stats,
+        Err(e) => {
+            eprintln!("Could not retrieve {}'s last loss: {e:?}", challenger.name);
+            ephemeral_message(ctx, "Something went wrong when trying to join the fight.").await?;
+            return Ok(());
         }
     };
 
@@ -138,9 +134,14 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         let accepter_nick = nickname(accepter, &ctx).await;
         let accepter_name = accepter_nick.as_deref().unwrap_or(&challenger.name);
 
-        let accepter_stats = {
-            let mut conn = ctx.data().database.acquire().await?;
-            get_character_stats(&mut conn, accepter.id.to_string()).await?
+        let accepter_stats = match retrieve_user_stats(ctx, accepter).await {
+            Ok(stats) => stats,
+            Err(e) => {
+                eprintln!("Could not retrieve {}'s stats {e:?}", accepter.name);
+                let err_message = "Something went wrong when trying to retrieve your past stats.";
+                ephemeral_interaction_response(&ctx, interaction, err_message).await?;
+                continue;
+            }
         };
 
         let now = Utc::now().naive_utc();
@@ -263,6 +264,11 @@ fn unwrap_custom_data(ctx: Context<'_>) -> &RwLock<ChallengeData> {
 
 
     Ok(())
+}
+
+async fn retrieve_user_stats(ctx: Context<'_>, user: &User) -> Result<CharacterPastStats> {
+    let mut conn = ctx.data().database.acquire().await?;
+    get_character_stats(&mut conn, user.id.0).await
 }
 
 /// Preview what your character would look like with a new nickname
