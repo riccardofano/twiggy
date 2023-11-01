@@ -34,12 +34,12 @@ struct ChallengeData {
     in_progress: bool,
 }
 
+/// Challenge other chatters and prove your strength.
 #[poise::command(
     slash_command,
     guild_only,
     custom_data = "RwLock::new(ChallengeData::default())"
 )]
-/// Challenge other chatters and prove your strength.
 async fn challenge(ctx: Context<'_>) -> Result<()> {
     let custom_data_lock = unwrap_custom_data(ctx);
 
@@ -315,6 +315,7 @@ async fn character(
     Ok(())
 }
 
+/// Display your fight statistics
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn stats(ctx: Context<'_>, user: Option<User>, silent: Option<bool>) -> Result<()> {
     let silent = silent.unwrap_or(true);
@@ -378,6 +379,7 @@ async fn stats(ctx: Context<'_>, user: Option<User>, silent: Option<bool>) -> Re
     Ok(())
 }
 
+/// Who is the strongest chatter around?
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn ladder(ctx: Context<'_>, silent: Option<bool>) -> Result<()> {
     let silent = silent.unwrap_or(true);
