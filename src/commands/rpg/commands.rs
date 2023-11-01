@@ -71,20 +71,12 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         &challenger_nick.as_deref(),
     );
 
-    let mut row = CreateActionRow::default();
-    row.create_button(|f| {
-        f.custom_id("rpg-btn")
-            .emoji('⚔')
-            .label("Accept Fight".to_string())
-            .style(ButtonStyle::Primary)
-    });
-
     let accept_reply = ctx
         .send(|r| {
             r.content(format!(
                 "{challenger_name} is throwing down the gauntlet in challenge..."
             ))
-            .components(|c| c.add_action_row(row))
+            .components(|c| c.add_action_row(create_accept_button()))
         })
         .await?;
 
@@ -188,14 +180,6 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
                 .await
                 .put(reply_msg.id.0, fight_log);
         }
-
-        let mut summary_row = CreateActionRow::default();
-        summary_row.create_button(|f| {
-            f.custom_id("rpg-summary")
-                .emoji('📖')
-                .label("See summary".to_string())
-                .style(ButtonStyle::Secondary)
-        });
         let elo_change_summary = format!(
             "**{challenger_name}**{} [{new_challenger_elo}]. \
             **{accepter_name}**{} [{new_accepter_elo}].",
@@ -213,7 +197,7 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
                 r.kind(serenity::InteractionResponseType::UpdateMessage)
                     .interaction_response_data(|d| {
                         d.content(format!("{}\n{}", fight.summary(), elo_change_summary))
-                            .components(|c| c.set_action_row(summary_row))
+                            .components(|c| c.set_action_row(create_summary_button()))
                     })
             })
             .await?;
@@ -230,6 +214,9 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         })
         .await?;
 
+
+    Ok(())
+}
 
 fn unwrap_custom_data(ctx: Context<'_>) -> &RwLock<ChallengeData> {
     ctx.command()
@@ -256,6 +243,30 @@ fn assert_no_recent_loss(stats: &CharacterPastStats, name: &str) -> Result<()> {
 async fn retrieve_user_stats(ctx: Context<'_>, user: &User) -> Result<CharacterPastStats> {
     let mut conn = ctx.data().database.acquire().await?;
     get_character_stats(&mut conn, user.id.0).await
+}
+
+fn create_accept_button() -> CreateActionRow {
+    let mut row = CreateActionRow::default();
+    row.create_button(|f| {
+        f.custom_id("rpg-btn")
+            .emoji('⚔')
+            .label("Accept Fight".to_string())
+            .style(ButtonStyle::Primary)
+    });
+
+    row
+}
+
+fn create_summary_button() -> CreateActionRow {
+    let mut summary_row = CreateActionRow::default();
+    summary_row.create_button(|f| {
+        f.custom_id("rpg-summary")
+            .emoji('📖')
+            .label("See summary".to_string())
+            .style(ButtonStyle::Secondary)
+    });
+
+    summary_row
 }
 
 /// Preview what your character would look like with a new nickname
