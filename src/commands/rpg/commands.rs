@@ -60,20 +60,10 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         }
     };
 
-    let now = Utc::now().naive_utc();
-    let loss_cooldown_duration = chrono::Duration::from_std(LOSS_COOLDOWN)?;
-    if challenger_stats.last_loss + loss_cooldown_duration > now {
-        let time_until_duel = (challenger_stats.last_loss + loss_cooldown_duration).timestamp();
-        ephemeral_message(
-            ctx,
-            format!(
-                "{} you have recently lost a fight. Please try again <t:{}:R>.",
-                challenger_name, time_until_duel
-            ),
-        )
-        .await?;
+    if let Err(e) = assert_no_recent_loss(&challenger_stats, challenger_name) {
+        ephemeral_message(ctx, e.to_string()).await?;
         return Ok(());
-    }
+    };
 
     let challenger_character = Character::new(
         challenger.id.0,
@@ -144,14 +134,8 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
             }
         };
 
-        let now = Utc::now().naive_utc();
-        if accepter_stats.last_loss + loss_cooldown_duration > now {
-            let time_until_duel = (accepter_stats.last_loss + loss_cooldown_duration).timestamp();
-            let content = format!(
-                "{} you have recently lost a fight. Please try again <t:{}:R>.",
-                accepter_name, time_until_duel
-            );
-            ephemeral_interaction_response(&ctx, interaction, content).await?;
+        if let Err(e) = assert_no_recent_loss(&accepter_stats, accepter_name) {
+            ephemeral_interaction_response(&ctx, interaction, e.to_string()).await?;
             continue;
         }
 
@@ -262,6 +246,17 @@ fn unwrap_custom_data(ctx: Context<'_>) -> &RwLock<ChallengeData> {
         .expect("Expected to have passed a ChallengeData struct as custom_data")
 }
 
+fn assert_no_recent_loss(stats: &CharacterPastStats, name: &str) -> Result<()> {
+    let now = Utc::now().naive_utc();
+    let loss_cooldown_duration = chrono::Duration::from_std(LOSS_COOLDOWN)?;
+
+    if stats.last_loss + loss_cooldown_duration > now {
+        let time_until_duel = (stats.last_loss + loss_cooldown_duration).timestamp();
+
+        return Err(anyhow::anyhow!(
+            "{name} you have recently lost a duel. Please try again <t:{time_until_duel}:R>."
+        ));
+    }
 
     Ok(())
 }
