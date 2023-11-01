@@ -40,11 +40,7 @@ struct ChallengeData {
     custom_data = "RwLock::new(ChallengeData::default())"
 )]
 async fn challenge(ctx: Context<'_>) -> Result<()> {
-    let custom_data_lock = ctx
-        .command()
-        .custom_data
-        .downcast_ref::<RwLock<ChallengeData>>()
-        .expect("Expected to have passed a ChallengeData struct as custom_data");
+    let custom_data_lock = unwrap_custom_data(ctx);
 
     if custom_data_lock.read().await.in_progress {
         ephemeral_message(ctx, "A RPG fight is already in progress").await?;
@@ -257,8 +253,14 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         })
         .await?;
 
-    let mut data = custom_data_lock.write().await;
-    data.in_progress = false;
+
+fn unwrap_custom_data(ctx: Context<'_>) -> &RwLock<ChallengeData> {
+    ctx.command()
+        .custom_data
+        .downcast_ref::<RwLock<ChallengeData>>()
+        .expect("Expected to have passed a ChallengeData struct as custom_data")
+}
+
 
     Ok(())
 }
