@@ -300,14 +300,11 @@ async fn character(
     #[description = "Whether the message will be shown to everyone or not"] silent: Option<bool>,
 ) -> Result<()> {
     let silent = silent.unwrap_or(true);
-    let person = match user {
-        Some(user) => user,
-        None => ctx.author().to_owned(),
-    };
+    let user = user.as_ref().unwrap_or_else(|| ctx.author());
 
-    let nick = nickname(&person, &ctx).await;
-    let name = nick.as_deref().unwrap_or(&person.name);
-    let character = Character::new(person.id.0, name, &nick.as_deref());
+    let nick = nickname(user, &ctx).await;
+    let name = nick.as_deref().unwrap_or(&user.name);
+    let character = Character::new(user.id.0, name, &nick.as_deref());
 
     ctx.send(|r| r.embed(|e| character.to_embed(e)).ephemeral(silent))
         .await?;
@@ -319,13 +316,10 @@ async fn character(
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn stats(ctx: Context<'_>, user: Option<User>, silent: Option<bool>) -> Result<()> {
     let silent = silent.unwrap_or(true);
-    let user = match user {
-        Some(user) => user,
-        None => ctx.author().to_owned(),
-    };
+    let user = user.as_ref().unwrap_or_else(|| ctx.author());
 
     let mut conn = ctx.data().database.acquire().await?;
-    let user_name = name(&user, &ctx).await;
+    let user_name = name(user, &ctx).await;
     let character_scoresheet =
         try_get_character_scoresheet(&mut conn, &user.id.to_string()).await?;
     let Some(user_record) = character_scoresheet else {
@@ -366,7 +360,7 @@ async fn stats(ctx: Context<'_>, user: Option<User>, silent: Option<bool>) -> Re
         message.ephemeral(silent).embed(|embed| {
             embed
                 .colour(0x009933)
-                .author(|a| a.icon_url(avatar_url(&user)).name(title))
+                .author(|a| a.icon_url(avatar_url(user)).name(title))
                 .fields(vec![
                     ("Current Rank", current_desc, false),
                     ("Peak Rank", peak_desc, false),
