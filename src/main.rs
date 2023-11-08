@@ -8,10 +8,12 @@ use commands::*;
 use lru::LruCache;
 use poise::serenity_prelude as serenity;
 use poise::serenity_prelude::Mutex;
+use tokio::sync::RwLock;
 
 pub struct Data {
     database: sqlx::SqlitePool,
     rpg_summary_cache: Mutex<LruCache<u64, String>>,
+    quote_data: RwLock<QuoteData>,
 }
 pub type Context<'a> = poise::Context<'a, Data, anyhow::Error>;
 pub type Error = anyhow::Error;
@@ -41,6 +43,7 @@ async fn main() {
                 color(),
                 uncolor(),
                 sudoku(),
+                quote(),
             ],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some(String::from(">")),
@@ -63,6 +66,7 @@ async fn main() {
                 Ok(Data {
                     database,
                     rpg_summary_cache: Mutex::new(LruCache::new(NonZeroUsize::new(10).unwrap())),
+                    quote_data: RwLock::new(QuoteData::new()),
                 })
             })
         });
