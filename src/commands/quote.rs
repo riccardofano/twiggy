@@ -73,11 +73,9 @@ async fn generate_message(ctx: &Context<'_>, quote_id: Option<u64>) -> Result<St
 }
 
 async fn update_quotes(ctx: &Context<'_>) {
-    let mut had_to_fetch = false;
     let last_updated = ctx.data().quote_data.read().await.last_updated;
 
     if cache_expired(last_updated) {
-        had_to_fetch = true;
         let response = match fetch_quotes().await {
             Ok(response) => response,
             Err(e) => {
@@ -89,12 +87,6 @@ async fn update_quotes(ctx: &Context<'_>) {
         let mut data = ctx.data().quote_data.write().await;
         data.cache = response.data;
         data.last_updated = Utc::now().naive_utc();
-    }
-
-    if had_to_fetch {
-        eprintln!("Had to fetch quotes");
-    } else {
-        eprintln!("Got them from the cache");
     }
 }
 
