@@ -698,7 +698,7 @@ impl UserAction {
 }
 
 async fn update_last_user_action(
-    conn: impl SqliteExecutor<'_>,
+    executor: impl SqliteExecutor<'_>,
     user_id: &str,
     action: UserAction,
 ) -> Result<()> {
@@ -708,7 +708,7 @@ async fn update_last_user_action(
     ));
     query.push_bind(user_id);
 
-    query.build().execute(conn).await?;
+    query.build().execute(executor).await?;
 
     Ok(())
 }
@@ -930,7 +930,7 @@ async fn insert_dino(
 }
 
 async fn update_hatch_message(
-    conn: &mut SqliteConnection,
+    executor: impl SqliteExecutor<'_>,
     dino_id: i64,
     message_link: &str,
 ) -> Result<()> {
@@ -941,7 +941,7 @@ async fn update_hatch_message(
         message_link,
         dino_id
     )
-    .execute(conn)
+    .execute(executor)
     .await?;
 
     Ok(())
@@ -1253,7 +1253,7 @@ async fn roll_to_hatch(ctx: Context<'_>) -> Result<i64> {
 }
 
 async fn try_hatching(
-    conn: impl SqliteExecutor<'_>,
+    executor: impl SqliteExecutor<'_>,
     ctx: Context<'_>,
     user: &DinoUser,
 ) -> Result<()> {
@@ -1261,7 +1261,7 @@ async fn try_hatching(
 
     if hatch_roll <= (MAX_FAILED_HATCHES - user.record.consecutive_fails) {
         update_last_user_action(
-            conn,
+            executor,
             &ctx.author().id.to_string(),
             UserAction::Hatch(user.record.consecutive_fails + 1),
         )
