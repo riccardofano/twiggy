@@ -1,20 +1,15 @@
-use std::{
-    borrow::Cow,
-    fs,
-    io::Cursor,
-    path::{Path, PathBuf},
-    str::FromStr,
-    time::Duration,
-};
-
 use anyhow::bail;
 use chrono::{NaiveDateTime, Utc};
 use image::{imageops::overlay, io::Reader, ImageBuffer, ImageOutputFormat, RgbaImage};
 use poise::serenity_prelude::{AttachmentType, ButtonStyle, CreateActionRow, User, UserId};
 use rand::{seq::SliceRandom, thread_rng};
+use sqlx::error::DatabaseError;
 use sqlx::sqlite::SqliteError;
-use sqlx::{error::DatabaseError, SqliteExecutor};
-use sqlx::{FromRow, QueryBuilder, Row, Sqlite, SqliteConnection, SqlitePool};
+use sqlx::{FromRow, QueryBuilder, Row, Sqlite, SqliteExecutor, SqlitePool};
+use std::borrow::Cow;
+use std::io::Cursor;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::{
@@ -56,7 +51,7 @@ pub const SHUN_BUTTON: &str = "dino-shun";
 pub const FAVOURITE_BUTTON: &str = "dino-favourite";
 
 fn setup_dinos() -> RwLock<Fragments> {
-    let fragments_dir = fs::read_dir(FRAGMENT_PATH).expect("Could not read fragment path");
+    let fragments_dir = std::fs::read_dir(FRAGMENT_PATH).expect("Could not read fragment path");
 
     let mut fragments = Fragments::default();
 
@@ -584,7 +579,7 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
         .message()
         .await?
         .await_component_interaction(ctx)
-        .timeout(Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(10))
         .collect_limit(1)
         .await
     {
@@ -1175,7 +1170,7 @@ async fn delete_dino(executor: impl SqliteExecutor<'_>, dino_id: i64) -> Result<
 
     let file_path = Path::new(OUTPUT_PATH).join(row.filename);
     if file_path.exists() {
-        fs::remove_file(file_path)?;
+        std::fs::remove_file(file_path)?;
     }
 
     Ok(())
