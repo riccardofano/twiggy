@@ -88,11 +88,7 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         })
         .await?;
 
-    {
-        // NOTE: Scope to drop the handle to the lock
-        let mut duel_data = custom_data_lock.write().await;
-        duel_data.in_progress = true;
-    }
+    update_in_progress_status(custom_data_lock, true).await;
 
     while let Some(interaction) = accept_reply
         .message()
@@ -150,6 +146,7 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
 
         let mut conn = ctx.data().database.acquire().await?;
         let mut transaction = conn.begin().await?;
+
         let winner_text = match challenger_score.cmp(&accepter_score) {
             Ordering::Greater => {
                 update_user_score(&mut transaction, challenger.id.to_string(), Score::Win).await?;
@@ -196,8 +193,7 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
             ).components(|c| c))
         }).await?;
 
-        let mut duel_data = custom_data_lock.write().await;
-        duel_data.in_progress = false;
+        update_in_progress_status(custom_data_lock, false).await;
 
         return Ok(());
     }
@@ -209,8 +205,8 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
                 .components(|c| c)
         })
         .await?;
-    let mut duel_data = custom_data_lock.write().await;
-    duel_data.in_progress = false;
+
+    update_in_progress_status(custom_data_lock, false).await;
 
     Ok(())
 }
@@ -350,4 +346,9 @@ fn unwrap_duel_data(ctx: Context<'_>) -> &RwLock<DuelData> {
         .custom_data
         .downcast_ref::<RwLock<DuelData>>()
         .expect("Expected to have passed a DuelData struct as custom_data")
+}
+
+async fn update_in_progress_status(custom_data_lock: &RwLock<DuelData>, new_status: bool) {
+    let mut cmd_data = custom_data_lock.write().await;
+    cmd_data.in_progress = new_status;
 }
