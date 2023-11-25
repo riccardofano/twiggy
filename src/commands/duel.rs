@@ -6,10 +6,11 @@ use crate::Context;
 
 use anyhow::Result;
 use chrono::{NaiveDateTime, Utc};
-use poise::serenity_prelude::{ButtonStyle, CreateActionRow};
+use poise::serenity_prelude::{ButtonStyle, CreateActionRow, User, UserId};
 use rand::Rng;
 use sqlx::{Connection, QueryBuilder, SqliteExecutor};
 use std::cmp::Ordering;
+use std::fmt::Display;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
@@ -29,8 +30,7 @@ struct DuelData {
     custom_data = "RwLock::new(DuelData::default())"
 )]
 pub async fn duel(ctx: Context<'_>) -> Result<()> {
-    let challenger = ctx.author();
-
+    let challenger = DuelUser::from(ctx, ctx.author()).await;
     let custom_data_lock = unwrap_duel_data(ctx);
 
     if custom_data_lock.read().await.in_progress {
@@ -42,20 +42,11 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
     // for the entirety of the duel duration. Which meant that if, for example,
     // removing the `duel_in_progress` check, I ran 5 duels at the same time
     // (the max number of connections in the pool) the bot would stop responding on the 6th one
-    let challenger_last_loss = {
-        let mut conn = ctx.data().database.acquire().await?;
-        match get_last_loss(&mut conn, challenger.id.to_string()).await {
-            Ok(last_loss) => last_loss,
-            Err(e) => {
-                eprintln!("Could not retrieve {}'s last loss: {e:?}", challenger.name);
-                ephemeral_message(ctx, "Something went wrong when trying to join the duel.")
-                    .await?;
-                return Ok(());
-            }
-        }
+    let Ok(challenger_last_loss) = get_last_loss(&ctx.data().database, &challenger.string_id).await
+    else {
+        ephemeral_message(ctx, "Something went wrong when trying to join the duel.").await?;
+        return Ok(());
     };
-
-    let challenger_name = name(&ctx, challenger).await;
 
     let now = Utc::now().naive_utc();
     let loss_cooldown_duration = chrono::Duration::from_std(LOSS_COOLDOWN)?;
@@ -64,16 +55,14 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         ephemeral_message(
             ctx,
             format!(
-                "{} you have recently lost a duel. Please try again <t:{}:R>.",
-                challenger_name, time_until_duel
+                "{challenger} you have recently lost a duel. Please try again <t:{time_until_duel}:R>.",
             ),
         )
         .await?;
         return Ok(());
     }
 
-    let initial_msg =
-        format!("{challenger_name} is looking for a duel, press the button to accept.");
+    let initial_msg = format!("{challenger} is looking for a duel, press the button to accept.",);
     let accept_reply = send_message_with_row(ctx, initial_msg, create_accept_button()).await?;
 
     update_in_progress_status(custom_data_lock, true).await;
@@ -108,20 +97,14 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
             continue;
         }
 
-        let accepter = &interaction.user;
-        let accepter_name = &name(&ctx, accepter).await;
-
-        let accepter_last_loss = {
-            let mut conn = ctx.data().database.acquire().await?;
-            get_last_loss(&mut conn, accepter.id.to_string()).await?
-        };
+        let accepter = DuelUser::from(ctx, &interaction.user).await;
+        let accepter_last_loss = get_last_loss(&ctx.data().database, &accepter.string_id).await?;
 
         let now = Utc::now().naive_utc();
         if accepter_last_loss + loss_cooldown_duration > now {
             let time_until_duel = (accepter_last_loss + loss_cooldown_duration).timestamp();
             let content = format!(
-                "{} you have recently lost a duel. Please try again <t:{}:R>.",
-                accepter_name, time_until_duel
+                "{accepter} you have recently lost a duel. Please try again <t:{time_until_duel}:R>.",
             );
             ephemeral_interaction_response(&ctx, interaction, content).await?;
             continue;
@@ -137,22 +120,22 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
 
         let winner_text = match challenger_score.cmp(&accepter_score) {
             Ordering::Greater => {
-                update_user_score(&mut transaction, challenger.id.to_string(), Score::Win).await?;
-                update_user_score(&mut transaction, accepter.id.to_string(), Score::Loss).await?;
-                update_last_loss(&mut transaction, accepter.id.to_string()).await?;
+                update_user_score(&mut transaction, &challenger.string_id, Score::Win).await?;
+                update_user_score(&mut transaction, &accepter.string_id, Score::Loss).await?;
+                update_last_loss(&mut transaction, &accepter.string_id).await?;
 
-                format!("{challenger_name} has won!")
+                format!("{challenger} has won!")
             }
             Ordering::Less => {
-                update_user_score(&mut transaction, accepter.id.to_string(), Score::Win).await?;
-                update_user_score(&mut transaction, challenger.id.to_string(), Score::Loss).await?;
-                update_last_loss(&mut transaction, challenger.id.to_string()).await?;
+                update_user_score(&mut transaction, &accepter.string_id, Score::Win).await?;
+                update_user_score(&mut transaction, &challenger.string_id, Score::Loss).await?;
+                update_last_loss(&mut transaction, &challenger.string_id).await?;
 
-                format!("{accepter_name} has won!")
+                format!("{accepter} has won!")
             }
             Ordering::Equal => {
-                update_user_score(&mut transaction, challenger.id.to_string(), Score::Draw).await?;
-                update_user_score(&mut transaction, accepter.id.to_string(), Score::Draw).await?;
+                update_user_score(&mut transaction, &challenger.string_id, Score::Draw).await?;
+                update_user_score(&mut transaction, &accepter.string_id, Score::Draw).await?;
 
                 // NOTE: interaction fails if the user is the owner of the server
                 let timeout_end_time = Utc::now() + chrono::Duration::from_std(TIMEOUT_DURATION)?;
@@ -177,7 +160,7 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         interaction.create_interaction_response(ctx, |r| {
             r.kind(poise::serenity_prelude::InteractionResponseType::UpdateMessage)
             .interaction_response_data(|d| d.content(
-                format!("{accepter_name} has rolled a {accepter_score} and {challenger_name} has rolled a {challenger_score}. {winner_text}")
+                format!("{accepter} has rolled a {accepter_score} and {challenger} has rolled a {challenger_score}. {winner_text}")
             ).components(|c| c))
         }).await?;
 
@@ -188,7 +171,7 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
 
     accept_reply
         .edit(ctx, |f| {
-            f.content(format!("{challenger_name} failed to find someone to duel."))
+            f.content(format!("{challenger} failed to find someone to duel."))
                 // NOTE: this is how you remove components
                 .components(|c| c)
         })
@@ -235,10 +218,7 @@ pub async fn duelstats(ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
-async fn get_last_loss(
-    executor: impl SqliteExecutor<'_>,
-    user_id: String,
-) -> Result<NaiveDateTime> {
+async fn get_last_loss(executor: impl SqliteExecutor<'_>, user_id: &str) -> Result<NaiveDateTime> {
     let row = sqlx::query!(
         r#"
         INSERT OR IGNORE INTO User (id) VALUES (?);
@@ -253,7 +233,7 @@ async fn get_last_loss(
     Ok(row.last_loss)
 }
 
-async fn update_last_loss(executor: impl SqliteExecutor<'_>, user_id: String) -> Result<()> {
+async fn update_last_loss(executor: impl SqliteExecutor<'_>, user_id: &str) -> Result<()> {
     sqlx::query!(
         "UPDATE User SET last_loss = datetime('now') WHERE id = ?",
         user_id
@@ -266,7 +246,7 @@ async fn update_last_loss(executor: impl SqliteExecutor<'_>, user_id: String) ->
 
 async fn update_user_score(
     executor: impl SqliteExecutor<'_>,
-    user_id: String,
+    user_id: &str,
     score: Score,
 ) -> Result<()> {
     let update_query = match score {
@@ -290,11 +270,11 @@ async fn update_user_score(
     };
 
     let mut query = QueryBuilder::new("INSERT OR IGNORE INTO Duels (user_id) VALUES (");
-    query.push_bind(&user_id);
+    query.push_bind(user_id);
     query.push(format!(
         "); UPDATE Duels SET {update_query} WHERE user_id = "
     ));
-    query.push_bind(&user_id);
+    query.push_bind(user_id);
     query.build().execute(executor).await?;
 
     Ok(())
@@ -369,4 +349,28 @@ fn create_accept_button() -> CreateActionRow {
     });
 
     row
+}
+
+struct DuelUser {
+    id: UserId,
+    string_id: String,
+    name: String,
+}
+
+impl DuelUser {
+    async fn from(ctx: Context<'_>, user: &User) -> Self {
+        let id = user.id;
+
+        Self {
+            id,
+            string_id: id.to_string(),
+            name: name(&ctx, user).await,
+        }
+    }
+}
+
+impl Display for DuelUser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
 }
