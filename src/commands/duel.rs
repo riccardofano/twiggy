@@ -208,23 +208,11 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
 pub async fn duelstats(ctx: Context<'_>) -> Result<()> {
     let user = ctx.author();
     let conn = &mut ctx.data().database.acquire().await?;
-    let stats = get_duel_stats(conn, user.id.to_string()).await?;
 
-    if stats.is_none() {
+    let Some(stats) = get_duel_stats(conn, user.id.to_string()).await? else {
         ephemeral_message(ctx, "You have never dueled before.").await?;
         return Ok(());
-    }
-
-    let stats = stats.unwrap();
-    let current_streak = match (stats.win_streak, stats.loss_streak, stats.draws) {
-        (0, 0, 0) => "You have never dueled before".to_string(),
-        (0, 0, _) => "Your last duel was a draw".to_string(),
-        (0, _, _) => format!("Current streak **{} losses**", stats.loss_streak),
-        (_, 0, _) => format!("Current streak **{} wins**", stats.win_streak),
-        _ => unreachable!(),
     };
-    let best_streak = format!("Best streak: **{} wins**", stats.win_streak_max);
-    let worst_streak = format!("Worst streak: **{} losses**", stats.loss_streak_max);
 
     let name = name(&ctx, user).await;
     let colour = colour(&ctx).await.unwrap_or_else(|| 0x77618F.into());
@@ -232,7 +220,12 @@ pub async fn duelstats(ctx: Context<'_>) -> Result<()> {
     ctx.send(|r| {
         r.embed(|e| {
             e.colour(colour)
-                .description(format!("{current_streak}\n{best_streak}\n{worst_streak}"))
+                .description(format!(
+                    "{}\n{}\n{}",
+                    stats.current_streak(),
+                    stats.best_streak(),
+                    stats.worst_streak()
+                ))
                 .author(|a| {
                     a.icon_url(user.avatar_url().unwrap_or_else(|| "".into()))
                         .name(format!(
@@ -319,6 +312,26 @@ struct DuelStats {
     loss_streak: i64,
     win_streak_max: i64,
     loss_streak_max: i64,
+}
+
+impl DuelStats {
+    fn current_streak(&self) -> String {
+        match (self.win_streak, self.loss_streak, self.draws) {
+            (0, 0, 0) => "You have never dueled before".to_string(),
+            (0, 0, _) => "Your last duel was a draw".to_string(),
+            (0, _, _) => format!("Current streak **{} losses**", self.loss_streak),
+            (_, 0, _) => format!("Current streak **{} wins**", self.win_streak),
+            _ => unreachable!(),
+        }
+    }
+
+    fn best_streak(&self) -> String {
+        format!("Best streak: **{} wins**", self.win_streak_max)
+    }
+
+    fn worst_streak(&self) -> String {
+        format!("Worst streak: **{} losses**", self.loss_streak_max)
+    }
 }
 
 async fn get_duel_stats(conn: &mut SqliteConnection, user_id: String) -> Result<Option<DuelStats>> {
