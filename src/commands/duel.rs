@@ -4,7 +4,7 @@ use crate::common::{
 };
 use crate::Context;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use chrono::{NaiveDateTime, Utc};
 use poise::serenity_prelude::{ButtonStyle, CreateActionRow, User, UserId};
 use rand::Rng;
@@ -15,7 +15,8 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 
 const DEAD_DUEL_COOLDOWN: Duration = Duration::from_secs(5 * 60);
-const LOSS_COOLDOWN: Duration = Duration::from_secs(10 * 60);
+// TODO: this should be replaced with a const chrono::Duration when that gets stabilized
+const LOSS_COOLDOWN: i64 = 60;
 const TIMEOUT_DURATION: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Default)]
@@ -38,27 +39,8 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         return Ok(());
     }
 
-    // NOTE: Creating a scope drop the connection otherwise the connection would be held
-    // for the entirety of the duel duration. Which meant that if, for example,
-    // removing the `duel_in_progress` check, I ran 5 duels at the same time
-    // (the max number of connections in the pool) the bot would stop responding on the 6th one
-    let Ok(challenger_last_loss) = get_last_loss(&ctx.data().database, &challenger.string_id).await
-    else {
-        ephemeral_message(ctx, "Something went wrong when trying to join the duel.").await?;
-        return Ok(());
-    };
-
-    let now = Utc::now().naive_utc();
-    let loss_cooldown_duration = chrono::Duration::from_std(LOSS_COOLDOWN)?;
-    if challenger_last_loss + loss_cooldown_duration > now {
-        let time_until_duel = (challenger_last_loss + loss_cooldown_duration).timestamp();
-        ephemeral_message(
-            ctx,
-            format!(
-                "{challenger} you have recently lost a duel. Please try again <t:{time_until_duel}:R>.",
-            ),
-        )
-        .await?;
+    if let Err(e) = challenger.ensure_outside_cooldown(ctx).await {
+        ephemeral_message(ctx, e.to_string()).await?;
         return Ok(());
     }
 
@@ -98,16 +80,9 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         }
 
         let accepter = DuelUser::from(ctx, &interaction.user).await;
-        let accepter_last_loss = get_last_loss(&ctx.data().database, &accepter.string_id).await?;
-
-        let now = Utc::now().naive_utc();
-        if accepter_last_loss + loss_cooldown_duration > now {
-            let time_until_duel = (accepter_last_loss + loss_cooldown_duration).timestamp();
-            let content = format!(
-                "{accepter} you have recently lost a duel. Please try again <t:{time_until_duel}:R>.",
-            );
-            ephemeral_interaction_response(&ctx, interaction, content).await?;
-            continue;
+        if let Err(e) = accepter.ensure_outside_cooldown(ctx).await {
+            ephemeral_interaction_response(&ctx, interaction, e.to_string()).await?;
+            return Ok(());
         }
 
         let (challenger_score, accepter_score) = {
@@ -366,6 +341,26 @@ impl DuelUser {
             string_id: id.to_string(),
             name: name(&ctx, user).await,
         }
+    }
+
+    async fn ensure_outside_cooldown(&self, ctx: Context<'_>) -> Result<()> {
+        let last_loss = match get_last_loss(&ctx.data().database, &self.string_id).await {
+            Ok(last_loss) => last_loss,
+            Err(e) => {
+                eprintln!("Could not get {self}'s last loss: {e:?}");
+                bail!("Couldn't get your last loss, no duel for you! :<");
+            }
+        };
+
+        let now = Utc::now().naive_utc();
+
+        let loss_cooldown_duration = chrono::Duration::minutes(LOSS_COOLDOWN);
+        if last_loss + loss_cooldown_duration > now {
+            let time_until_duel = (last_loss + loss_cooldown_duration).timestamp();
+            bail!("{self} you have recently lost a duel. Please try again <t:{time_until_duel}:R>.")
+        }
+
+        Ok(())
     }
 }
 
