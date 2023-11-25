@@ -1,5 +1,5 @@
 use crate::common::{
-    colour, ephemeral_interaction_response, ephemeral_message, member, name, Score,
+    avatar_url, colour, ephemeral_interaction_response, ephemeral_message, member, name, Score,
 };
 use crate::Context;
 
@@ -227,11 +227,10 @@ pub async fn duelstats(ctx: Context<'_>) -> Result<()> {
                     stats.worst_streak()
                 ))
                 .author(|a| {
-                    a.icon_url(user.avatar_url().unwrap_or_else(|| "".into()))
-                        .name(format!(
-                            "{name}'s scoresheet: {}-{}-{}",
-                            stats.wins, stats.losses, stats.draws
-                        ))
+                    a.icon_url(avatar_url(user)).name(format!(
+                        "{name}'s scoresheet: {}-{}-{}",
+                        stats.wins, stats.losses, stats.draws
+                    ))
                 })
         })
     })
