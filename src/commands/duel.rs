@@ -7,7 +7,7 @@ use anyhow::Result;
 use chrono::{NaiveDateTime, Utc};
 use poise::serenity_prelude::{ButtonStyle, CreateActionRow};
 use rand::Rng;
-use sqlx::{Connection, QueryBuilder, SqliteConnection};
+use sqlx::{Connection, QueryBuilder, SqliteExecutor};
 use std::cmp::Ordering;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -239,7 +239,10 @@ pub async fn duelstats(ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
-async fn get_last_loss(conn: &mut SqliteConnection, user_id: String) -> Result<NaiveDateTime> {
+async fn get_last_loss(
+    executor: impl SqliteExecutor<'_>,
+    user_id: String,
+) -> Result<NaiveDateTime> {
     let row = sqlx::query!(
         r#"
         INSERT OR IGNORE INTO User (id) VALUES (?);
@@ -248,25 +251,25 @@ async fn get_last_loss(conn: &mut SqliteConnection, user_id: String) -> Result<N
         user_id,
         user_id
     )
-    .fetch_one(conn)
+    .fetch_one(executor)
     .await?;
 
     Ok(row.last_loss)
 }
 
-async fn update_last_loss(conn: &mut SqliteConnection, user_id: String) -> Result<()> {
+async fn update_last_loss(executor: impl SqliteExecutor<'_>, user_id: String) -> Result<()> {
     sqlx::query!(
         "UPDATE User SET last_loss = datetime('now') WHERE id = ?",
         user_id
     )
-    .execute(conn)
+    .execute(executor)
     .await?;
 
     Ok(())
 }
 
 async fn update_user_score(
-    conn: &mut SqliteConnection,
+    executor: impl SqliteExecutor<'_>,
     user_id: String,
     score: Score,
 ) -> Result<()> {
@@ -296,7 +299,7 @@ async fn update_user_score(
         "); UPDATE Duels SET {update_query} WHERE user_id = "
     ));
     query.push_bind(&user_id);
-    query.build().execute(conn).await?;
+    query.build().execute(executor).await?;
 
     Ok(())
 }
@@ -333,13 +336,16 @@ impl DuelStats {
     }
 }
 
-async fn get_duel_stats(conn: &mut SqliteConnection, user_id: String) -> Result<Option<DuelStats>> {
+async fn get_duel_stats(
+    executor: impl SqliteExecutor<'_>,
+    user_id: String,
+) -> Result<Option<DuelStats>> {
     let stats = sqlx::query_as!(
         DuelStats,
         r#"SELECT * FROM Duels WHERE user_id = ?"#,
         user_id
     )
-    .fetch_optional(conn)
+    .fetch_optional(executor)
     .await?;
 
     Ok(stats)
