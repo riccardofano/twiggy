@@ -30,11 +30,7 @@ struct DuelData {
 pub async fn duel(ctx: Context<'_>) -> Result<()> {
     let challenger = ctx.author();
 
-    let custom_data_lock = ctx
-        .command()
-        .custom_data
-        .downcast_ref::<RwLock<DuelData>>()
-        .expect("Expected to have passed a DuelData struct as custom_data");
+    let custom_data_lock = unwrap_duel_data(ctx);
 
     if custom_data_lock.read().await.in_progress {
         ephemeral_message(ctx, "A duel is already in progress").await?;
@@ -347,4 +343,11 @@ async fn get_duel_stats(conn: &mut SqliteConnection, user_id: String) -> Result<
     .await?;
 
     Ok(stats)
+}
+
+fn unwrap_duel_data(ctx: Context<'_>) -> &RwLock<DuelData> {
+    ctx.command()
+        .custom_data
+        .downcast_ref::<RwLock<DuelData>>()
+        .expect("Expected to have passed a DuelData struct as custom_data")
 }
