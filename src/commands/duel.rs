@@ -71,20 +71,12 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         return Ok(());
     }
 
-    let mut row = CreateActionRow::default();
-    row.create_button(|f| {
-        f.custom_id("duel-btn")
-            .emoji('🎲')
-            .label("Accept Duel".to_string())
-            .style(ButtonStyle::Primary)
-    });
-
     let accept_reply = ctx
         .send(|r| {
             r.content(format!(
                 "{challenger_name} is looking for a duel, press the button to accept."
             ))
-            .components(|c| c.add_action_row(row))
+            .components(|c| c.add_action_row(create_accept_button()))
         })
         .await?;
 
@@ -351,4 +343,16 @@ fn unwrap_duel_data(ctx: Context<'_>) -> &RwLock<DuelData> {
 async fn update_in_progress_status(custom_data_lock: &RwLock<DuelData>, new_status: bool) {
     let mut cmd_data = custom_data_lock.write().await;
     cmd_data.in_progress = new_status;
+}
+
+fn create_accept_button() -> CreateActionRow {
+    let mut row = CreateActionRow::default();
+    row.create_button(|f| {
+        f.custom_id("duel-btn")
+            .emoji('🎲')
+            .label("Accept Duel".to_string())
+            .style(ButtonStyle::Primary)
+    });
+
+    row
 }
