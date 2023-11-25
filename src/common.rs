@@ -5,6 +5,7 @@ use poise::ReplyHandle;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rand_seeder::Seeder;
+use serenity::builder::CreateActionRow;
 use std::borrow::Cow;
 use std::sync::Arc;
 
@@ -25,6 +26,15 @@ pub async fn ephemeral_interaction_response<S: AsRef<str>>(
         .create_interaction_response(&ctx, |r| {
             r.interaction_response_data(|d| d.content(content.as_ref()).ephemeral(true))
         })
+        .await
+}
+
+pub async fn send_message_with_row(
+    ctx: Context<'_>,
+    content: impl Into<String>,
+    row: CreateActionRow,
+) -> Result<ReplyHandle, Error> {
+    ctx.send(|r| r.content(content).components(|c| c.add_action_row(row)))
         .await
 }
 

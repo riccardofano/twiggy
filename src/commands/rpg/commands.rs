@@ -4,7 +4,8 @@ use super::fight::RPGFight;
 
 use crate::commands::rpg::elo::find_ladder_rank;
 use crate::common::{
-    avatar_url, ephemeral_interaction_response, ephemeral_message, name, nickname, Score,
+    avatar_url, ephemeral_interaction_response, ephemeral_message, name, nickname,
+    send_message_with_row, Score,
 };
 use crate::Context;
 
@@ -72,14 +73,8 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         &challenger_nick.as_deref(),
     );
 
-    let accept_reply = ctx
-        .send(|r| {
-            r.content(format!(
-                "{challenger_name} is throwing down the gauntlet in challenge..."
-            ))
-            .components(|c| c.add_action_row(create_accept_button()))
-        })
-        .await?;
+    let initial_msg = format!("{challenger_name} is throwing down the gauntlet in challenge...");
+    let accept_reply = send_message_with_row(ctx, initial_msg, create_accept_button()).await?;
 
     update_in_progress_status(custom_data_lock, true).await;
 

@@ -1,5 +1,6 @@
 use crate::common::{
-    avatar_url, colour, ephemeral_interaction_response, ephemeral_message, member, name, Score,
+    avatar_url, colour, ephemeral_interaction_response, ephemeral_message, member, name,
+    send_message_with_row, Score,
 };
 use crate::Context;
 
@@ -71,14 +72,9 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         return Ok(());
     }
 
-    let accept_reply = ctx
-        .send(|r| {
-            r.content(format!(
-                "{challenger_name} is looking for a duel, press the button to accept."
-            ))
-            .components(|c| c.add_action_row(create_accept_button()))
-        })
-        .await?;
+    let initial_msg =
+        format!("{challenger_name} is looking for a duel, press the button to accept.");
+    let accept_reply = send_message_with_row(ctx, initial_msg, create_accept_button()).await?;
 
     update_in_progress_status(custom_data_lock, true).await;
 
