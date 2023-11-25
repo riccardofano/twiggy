@@ -58,7 +58,7 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         }
     };
 
-    let challenger_name = name(challenger, &ctx).await;
+    let challenger_name = name(&ctx, challenger).await;
 
     let now = Utc::now().naive_utc();
     let loss_cooldown_duration = chrono::Duration::from_std(LOSS_COOLDOWN)?;
@@ -129,7 +129,7 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         }
 
         let accepter = &interaction.user;
-        let accepter_name = &name(accepter, &ctx).await;
+        let accepter_name = &name(&ctx, accepter).await;
 
         let accepter_last_loss = {
             let mut conn = ctx.data().database.acquire().await?;
@@ -242,7 +242,7 @@ pub async fn duelstats(ctx: Context<'_>) -> Result<()> {
     let best_streak = format!("Best streak: **{} wins**", stats.win_streak_max);
     let worst_streak = format!("Worst streak: **{} losses**", stats.loss_streak_max);
 
-    let name = name(user, &ctx).await;
+    let name = name(&ctx, user).await;
     let colour = colour(&ctx).await.unwrap_or_else(|| 0x77618F.into());
 
     ctx.send(|r| {

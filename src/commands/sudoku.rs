@@ -41,7 +41,7 @@ pub async fn sudoku(
         Some(message) => format!("\n> {message}"),
         None => String::new(),
     };
-    let author_name = name(ctx.author(), &ctx).await;
+    let author_name = name(&ctx, ctx.author()).await;
 
     ctx.say(format!(
         "{author_name} has been timed out for {random_timeout} seconds, or until <t:{}:T>.{goodbye_message}",

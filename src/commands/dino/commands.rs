@@ -208,7 +208,7 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     let dino = insert_dino(&mut transaction, &user.id, &parts, &image_path, None).await?;
     update_last_user_action(&mut transaction, &user.id, UserAction::Hatch(0)).await?;
 
-    let author_name = get_name(author, &ctx).await;
+    let author_name = get_name(&ctx, author).await;
     let message = send_dino_embed(
         ctx,
         &dino,
@@ -246,14 +246,14 @@ async fn collection(
     if dino_collection.dinos.is_empty() {
         let content = match user_is_author {
             true => "You don't have any dinos :'(".to_string(),
-            false => format!("{} doesn't have any dinos :'(", get_name(user, &ctx).await),
+            false => format!("{} doesn't have any dinos :'(", get_name(&ctx, user).await),
         };
         ephemeral_message(ctx, content).await?;
         return Ok(());
     }
 
     let image = generate_dino_collection_image(&dino_collection.dinos)?;
-    let author_name = get_name(user, &ctx).await;
+    let author_name = get_name(&ctx, user).await;
     let filename = format!("{}_collection.png", user.name);
 
     ctx.send(|message| {
@@ -342,7 +342,7 @@ async fn view(
 
     let owner_user_id = UserId::from_str(&dino.owner_id)?;
     let (user_name, user_avatar) = match owner_user_id.to_user(&ctx).await {
-        Ok(user) => (get_name(&user, &ctx).await, avatar_url(&user)),
+        Ok(user) => (get_name(&ctx, &user).await, avatar_url(&user)),
         Err(_) => {
             eprintln!("Could not find user with id: {owner_user_id}. Using a default owner name for this dino.");
             (
@@ -405,8 +405,8 @@ async fn gift(
     .await?;
     update_last_user_action(&mut transaction, &author_id, UserAction::Gift).await?;
 
-    let sender_name = get_name(ctx.author(), &ctx).await;
-    let receiver_name = get_name(&recipient, &ctx).await;
+    let sender_name = get_name(&ctx, ctx.author()).await;
+    let receiver_name = get_name(&ctx, &recipient).await;
     let dino_name = if dino_record.hatch_message.is_empty() {
         dino
     } else {
@@ -502,7 +502,7 @@ async fn slurp(
     let dino = insert_dino(&mut transaction, &author_id, &parts, &image_path, None).await?;
     update_last_user_action(&mut transaction, &author_id, UserAction::Slurp).await?;
 
-    let author_name = get_name(ctx.author(), &ctx).await;
+    let author_name = get_name(&ctx, ctx.author()).await;
     let message = send_dino_embed(
         ctx,
         &dino,
@@ -627,7 +627,7 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
         let image = generate_dino_collection_image(&created_dinos)?;
         let filename = format!("{}_collection.png", user_id);
 
-        let author_name = get_name(ctx.author(), &ctx).await;
+        let author_name = get_name(&ctx, ctx.author()).await;
         let author_avatar = avatar_url(ctx.author());
 
         let new_dino_names = created_dinos
