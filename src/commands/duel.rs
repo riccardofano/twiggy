@@ -6,7 +6,10 @@ use crate::Context;
 
 use anyhow::{bail, Result};
 use chrono::{NaiveDateTime, Utc};
-use poise::serenity_prelude::{ButtonStyle, CreateActionRow, User, UserId};
+use poise::serenity_prelude::{
+    ButtonStyle, CreateActionRow, InteractionResponseType, MessageComponentInteraction, User,
+    UserId,
+};
 use rand::Rng;
 use sqlx::{Connection, QueryBuilder, SqliteExecutor};
 use std::cmp::Ordering;
@@ -132,27 +135,35 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         };
         transaction.commit().await?;
 
-        interaction.create_interaction_response(ctx, |r| {
-            r.kind(poise::serenity_prelude::InteractionResponseType::UpdateMessage)
-            .interaction_response_data(|d| d.content(
-                format!("{accepter} has rolled a {accepter_score} and {challenger} has rolled a {challenger_score}. {winner_text}")
-            ).components(|c| c))
-        }).await?;
+        let final_message = format!("{accepter} has rolled a {accepter_score} and {challenger} has rolled a {challenger_score}. {winner_text}");
+        send_interaction_update(ctx, &interaction, final_message).await?;
 
         update_in_progress_status(custom_data_lock, false).await;
 
         return Ok(());
     }
 
+    let duel_timeout_msg = format!("{challenger} failed to find someone to duel.");
     accept_reply
-        .edit(ctx, |f| {
-            f.content(format!("{challenger} failed to find someone to duel."))
-                // NOTE: this is how you remove components
-                .components(|c| c)
-        })
+        .edit(ctx, |f| f.content(duel_timeout_msg).components(|c| c))
         .await?;
 
     update_in_progress_status(custom_data_lock, false).await;
+
+    Ok(())
+}
+
+async fn send_interaction_update(
+    ctx: Context<'_>,
+    interaction: &MessageComponentInteraction,
+    content: impl ToString,
+) -> Result<()> {
+    interaction
+        .create_interaction_response(ctx, |r| {
+            r.kind(InteractionResponseType::UpdateMessage)
+                .interaction_response_data(|d| d.content(content).components(|c| c))
+        })
+        .await?;
 
     Ok(())
 }
