@@ -73,12 +73,8 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         }
 
         if !custom_data_lock.read().await.in_progress {
-            ephemeral_interaction_response(
-                &ctx,
-                interaction,
-                "Someone beat you to the challenge already",
-            )
-            .await?;
+            let msg = "Someone beat you to the challenge already";
+            ephemeral_interaction_response(&ctx, interaction, msg).await?;
             continue;
         }
 
