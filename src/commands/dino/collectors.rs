@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 
+use anyhow::bail;
 use poise::futures_util::StreamExt;
 use poise::serenity_prelude::{self as serenity, MessageComponentInteraction};
 use poise::serenity_prelude::{ComponentInteractionCollectorBuilder, CreateEmbed};
@@ -70,7 +71,9 @@ async fn handle_dino_collector(
     let Some(dino_id) = dino_id else {
         interaction
             .create_interaction_response(&ctx, |r| {
-                r.interaction_response_data(|d| d.content("Could not find a dino id.").ephemeral(true))
+                r.interaction_response_data(|d| {
+                    d.content("Could not find a dino id.").ephemeral(true)
+                })
             })
             .await?;
         return Ok(());
@@ -90,14 +93,27 @@ async fn handle_dino_collector(
 
     if dino.is_none() {
         let old_embed = interaction.message.embeds[0].clone();
-        let dino_name = old_embed.title.clone().unwrap();
-        let old_image = old_embed.image.clone().unwrap();
-        let split_url = old_image.url.split('/').collect::<Vec<_>>();
-        let dino_image_name = split_url.last().unwrap();
+
+        let dino_name = &old_embed.title.as_deref().unwrap_or("Unknown dino");
+        let new_title = format!("{dino_name} is no longer with us 😔");
+
+        let dino_image_url = &old_embed
+            .image
+            .clone()
+            .expect("Dinos embeds should always have an image")
+            .url;
+        let url_without_query = match dino_image_url.split_once('?') {
+            Some((url, _query)) => url,
+            None => dino_image_url.as_str(),
+        };
+        let dino_image_name = url_without_query
+            .split('/')
+            .last()
+            .expect("All images should have a file name");
 
         let mut new_embed = CreateEmbed::from(old_embed);
         new_embed.attachment(dino_image_name);
-        new_embed.title(format!("{dino_name} is no longer with us 😔"));
+        new_embed.title(new_title);
 
         interaction
             .create_interaction_response(&ctx, |response| {
@@ -115,7 +131,7 @@ async fn handle_dino_collector(
         b if b.starts_with(COVET_BUTTON) => TransactionType::Covet,
         b if b.starts_with(SHUN_BUTTON) => TransactionType::Shun,
         b if b.starts_with(FAVOURITE_BUTTON) => TransactionType::Favourite,
-        _ => return Err(anyhow::anyhow!("unknown dino button pressed")),
+        _ => bail!("unknown dino button pressed"),
     };
 
     let response = handle_button_press(interaction, &mut transaction, dino_id, button_type).await?;
