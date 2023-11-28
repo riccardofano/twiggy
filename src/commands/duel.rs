@@ -85,7 +85,7 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         let accepter = DuelUser::from(ctx, &interaction.user).await;
         if let Err(e) = accepter.ensure_outside_cooldown(ctx).await {
             ephemeral_interaction_response(&ctx, interaction, e.to_string()).await?;
-            return Ok(());
+            continue;
         }
 
         let (challenger_score, accepter_score) = {
