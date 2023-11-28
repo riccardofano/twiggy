@@ -88,10 +88,7 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
             continue;
         }
 
-        let (challenger_score, accepter_score) = {
-            let mut rng = rand::thread_rng();
-            (rng.gen_range(0..=100), rng.gen_range(0..=100))
-        };
+        let (challenger_score, accepter_score) = pick_scores();
 
         let mut conn = ctx.data().database.acquire().await?;
         let mut transaction = conn.begin().await?;
@@ -379,4 +376,9 @@ impl Display for DuelUser {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.name)
     }
+}
+
+fn pick_scores() -> (usize, usize) {
+    let mut rng = rand::thread_rng();
+    (rng.gen_range(0..=100), rng.gen_range(0..=100))
 }
