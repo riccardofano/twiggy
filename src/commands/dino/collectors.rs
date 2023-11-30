@@ -180,35 +180,36 @@ async fn handle_button_press(
     button_type: TransactionType,
 ) -> Result<Option<String>> {
     let user_id = interaction.user.id.to_string();
-
     let same_type_transaction = fetch_transaction(conn, &user_id, dino_id, &button_type).await?;
 
-    match same_type_transaction {
-        Some(id) => {
+    let message = match (&button_type, same_type_transaction) {
+        (TransactionType::Favourite, Some(id)) => {
             delete_transaction(conn, id).await?;
-            if matches!(button_type, TransactionType::Favourite) {
-                return Ok(Some(
-                    "Dino has been removed from your favourites".to_string(),
-                ));
-            }
-            Ok(None)
+            Some("Dino has been removed from your favourites".to_owned())
         }
-        None => {
-            if let Some(opposite_type) = button_type.opposite() {
-                let opposite_transaction =
-                    fetch_transaction(conn, &user_id, dino_id, &opposite_type).await?;
-                if let Some(id) = opposite_transaction {
-                    delete_transaction(conn, id).await?;
-                }
-            };
+        (TransactionType::Covet | TransactionType::Shun, Some(id)) => {
+            delete_transaction(conn, id).await?;
+            None
+        }
+        (TransactionType::Favourite, None) => {
+            create_transaction(conn, &user_id, dino_id, &button_type).await?;
+            Some("Dino has been added to your favourites".to_owned())
+        }
+        (TransactionType::Covet | TransactionType::Shun, None) => {
+            let opposite_type = button_type
+                .opposite()
+                .expect("Buttons without an opposite have already been handled");
+
+            if let Some(id) = fetch_transaction(conn, &user_id, dino_id, &opposite_type).await? {
+                delete_transaction(conn, id).await?;
+            }
 
             create_transaction(conn, &user_id, dino_id, &button_type).await?;
-            if matches!(button_type, TransactionType::Favourite) {
-                return Ok(Some("Dino has been added to your favourites".to_string()));
-            }
-            Ok(None)
+            None
         }
-    }
+    };
+
+    Ok(message)
 }
 
 async fn fetch_transaction(
