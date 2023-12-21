@@ -4,7 +4,8 @@ use super::fight::RPGFight;
 
 use crate::commands::rpg::elo::find_ladder_rank;
 use crate::common::{
-    avatar_url, ephemeral_interaction_response, ephemeral_message, name, nickname, Score,
+    avatar_url, ephemeral_interaction_response, ephemeral_message, name, nickname,
+    send_message_with_row, Score,
 };
 use crate::Context;
 
@@ -49,7 +50,7 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
     }
 
     let challenger = ctx.author();
-    let challenger_nick = nickname(challenger, &ctx).await;
+    let challenger_nick = nickname(&ctx, challenger).await;
     let challenger_name = challenger_nick.as_deref().unwrap_or(&challenger.name);
 
     let challenger_stats = match retrieve_user_stats(ctx, challenger).await {
@@ -72,14 +73,8 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         &challenger_nick.as_deref(),
     );
 
-    let accept_reply = ctx
-        .send(|r| {
-            r.content(format!(
-                "{challenger_name} is throwing down the gauntlet in challenge..."
-            ))
-            .components(|c| c.add_action_row(create_accept_button()))
-        })
-        .await?;
+    let initial_msg = format!("{challenger_name} is throwing down the gauntlet in challenge...");
+    let accept_reply = send_message_with_row(ctx, initial_msg, create_accept_button()).await?;
 
     update_in_progress_status(custom_data_lock, true).await;
 
@@ -111,7 +106,7 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         }
 
         let accepter = &interaction.user;
-        let accepter_nick = nickname(accepter, &ctx).await;
+        let accepter_nick = nickname(&ctx, accepter).await;
         let accepter_name = accepter_nick.as_deref().unwrap_or(&challenger.name);
 
         let accepter_stats = match retrieve_user_stats(ctx, accepter).await {
@@ -302,7 +297,7 @@ async fn character(
     let silent = silent.unwrap_or(true);
     let user = user.as_ref().unwrap_or_else(|| ctx.author());
 
-    let nick = nickname(user, &ctx).await;
+    let nick = nickname(&ctx, user).await;
     let name = nick.as_deref().unwrap_or(&user.name);
     let character = Character::new(user.id.0, name, &nick.as_deref());
 
@@ -319,7 +314,7 @@ async fn stats(ctx: Context<'_>, user: Option<User>, silent: Option<bool>) -> Re
     let user = user.as_ref().unwrap_or_else(|| ctx.author());
 
     let mut conn = ctx.data().database.acquire().await?;
-    let user_name = name(user, &ctx).await;
+    let user_name = name(&ctx, user).await;
     let character_scoresheet =
         try_get_character_scoresheet(&mut conn, &user.id.to_string()).await?;
     let Some(user_record) = character_scoresheet else {

@@ -1,19 +1,25 @@
 use crate::common::{
-    colour, ephemeral_interaction_response, ephemeral_message, member, name, Score,
+    avatar_url, colour, ephemeral_interaction_response, ephemeral_message, name,
+    send_message_with_row, Score,
 };
 use crate::Context;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use chrono::{DateTime, NaiveDateTime, Utc};
-use poise::serenity_prelude::{ButtonStyle, CreateActionRow, Member};
+use poise::serenity_prelude::{
+    ButtonStyle, CreateActionRow, InteractionResponseType, Member, MessageComponentInteraction,
+    User, UserId,
+};
 use rand::Rng;
-use sqlx::{Connection, QueryBuilder, SqliteConnection};
+use sqlx::{Connection, QueryBuilder, SqliteExecutor};
 use std::cmp::Ordering;
+use std::fmt::Display;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
 const DEAD_DUEL_COOLDOWN: Duration = Duration::from_secs(5 * 60);
-const LOSS_COOLDOWN: Duration = Duration::from_secs(10 * 60);
+// TODO: this should be replaced with a const chrono::Duration when that gets stabilized
+const LOSS_COOLDOWN: i64 = 60;
 const TIMEOUT_DURATION: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Default)]
@@ -28,75 +34,23 @@ struct DuelData {
     custom_data = "RwLock::new(DuelData::default())"
 )]
 pub async fn duel(ctx: Context<'_>) -> Result<()> {
-    let challenger = ctx.author();
-
-    let custom_data_lock = ctx
-        .command()
-        .custom_data
-        .downcast_ref::<RwLock<DuelData>>()
-        .expect("Expected to have passed a DuelData struct as custom_data");
+    let challenger = DuelUser::from(ctx, ctx.author()).await;
+    let custom_data_lock = unwrap_duel_data(ctx);
 
     if custom_data_lock.read().await.in_progress {
         ephemeral_message(ctx, "A duel is already in progress").await?;
         return Ok(());
     }
 
-    // NOTE: Creating a scope drop the connection otherwise the connection would be held
-    // for the entirety of the duel duration. Which meant that if, for example,
-    // removing the `duel_in_progress` check, I ran 5 duels at the same time
-    // (the max number of connections in the pool) the bot would stop responding on the 6th one
-    let challenger_last_loss = {
-        let mut conn = ctx.data().database.acquire().await?;
-        match get_last_loss(&mut conn, challenger.id.to_string()).await {
-            Ok(last_loss) => last_loss,
-            Err(e) => {
-                eprintln!("Could not retrieve {}'s last loss: {e:?}", challenger.name);
-                ephemeral_message(ctx, "Something went wrong when trying to join the duel.")
-                    .await?;
-                return Ok(());
-            }
-        }
-    };
-
-    let challenger_name = name(challenger, &ctx).await;
-
-    let now = Utc::now().naive_utc();
-    let loss_cooldown_duration = chrono::Duration::from_std(LOSS_COOLDOWN)?;
-    if challenger_last_loss + loss_cooldown_duration > now {
-        let time_until_duel = (challenger_last_loss + loss_cooldown_duration).timestamp();
-        ephemeral_message(
-            ctx,
-            format!(
-                "{} you have recently lost a duel. Please try again <t:{}:R>.",
-                challenger_name, time_until_duel
-            ),
-        )
-        .await?;
+    if let Err(e) = challenger.ensure_outside_cooldown(ctx).await {
+        ephemeral_message(ctx, e.to_string()).await?;
         return Ok(());
     }
 
-    let mut row = CreateActionRow::default();
-    row.create_button(|f| {
-        f.custom_id("duel-btn")
-            .emoji('🎲')
-            .label("Accept Duel".to_string())
-            .style(ButtonStyle::Primary)
-    });
+    let initial_msg = format!("{challenger} is looking for a duel, press the button to accept.",);
+    let accept_reply = send_message_with_row(ctx, initial_msg, create_accept_button()).await?;
 
-    let accept_reply = ctx
-        .send(|r| {
-            r.content(format!(
-                "{challenger_name} is looking for a duel, press the button to accept."
-            ))
-            .components(|c| c.add_action_row(row))
-        })
-        .await?;
-
-    {
-        // NOTE: Scope to drop the handle to the lock
-        let mut duel_data = custom_data_lock.write().await;
-        duel_data.in_progress = true;
-    }
+    update_in_progress_status(custom_data_lock, true).await;
 
     while let Some(interaction) = accept_reply
         .message()
@@ -119,59 +73,40 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         }
 
         if !custom_data_lock.read().await.in_progress {
-            ephemeral_interaction_response(
-                &ctx,
-                interaction,
-                "Someone beat you to the challenge already",
-            )
-            .await?;
+            let msg = "Someone beat you to the challenge already";
+            ephemeral_interaction_response(&ctx, interaction, msg).await?;
             continue;
         }
 
-        let accepter = &interaction.user;
-        let accepter_name = &name(accepter, &ctx).await;
-
-        let accepter_last_loss = {
-            let mut conn = ctx.data().database.acquire().await?;
-            get_last_loss(&mut conn, accepter.id.to_string()).await?
-        };
-
-        let now = Utc::now().naive_utc();
-        if accepter_last_loss + loss_cooldown_duration > now {
-            let time_until_duel = (accepter_last_loss + loss_cooldown_duration).timestamp();
-            let content = format!(
-                "{} you have recently lost a duel. Please try again <t:{}:R>.",
-                accepter_name, time_until_duel
-            );
-            ephemeral_interaction_response(&ctx, interaction, content).await?;
+        let accepter = DuelUser::from(ctx, &interaction.user).await;
+        if let Err(e) = accepter.ensure_outside_cooldown(ctx).await {
+            ephemeral_interaction_response(&ctx, interaction, e.to_string()).await?;
             continue;
         }
 
-        let (challenger_score, accepter_score) = {
-            let mut rng = rand::thread_rng();
-            (rng.gen_range(0..=100), rng.gen_range(0..=100))
-        };
+        let (challenger_score, accepter_score) = pick_scores();
 
         let mut conn = ctx.data().database.acquire().await?;
         let mut transaction = conn.begin().await?;
+
         let winner_text = match challenger_score.cmp(&accepter_score) {
             Ordering::Greater => {
-                update_user_score(&mut transaction, challenger.id.to_string(), Score::Win).await?;
-                update_user_score(&mut transaction, accepter.id.to_string(), Score::Loss).await?;
-                update_last_loss(&mut transaction, accepter.id.to_string()).await?;
+                update_user_score(&mut transaction, &challenger.string_id, Score::Win).await?;
+                update_user_score(&mut transaction, &accepter.string_id, Score::Loss).await?;
+                update_last_loss(&mut transaction, &accepter.string_id).await?;
 
-                format!("{challenger_name} has won!")
+                format!("{challenger} has won!")
             }
             Ordering::Less => {
-                update_user_score(&mut transaction, accepter.id.to_string(), Score::Win).await?;
-                update_user_score(&mut transaction, challenger.id.to_string(), Score::Loss).await?;
-                update_last_loss(&mut transaction, challenger.id.to_string()).await?;
+                update_user_score(&mut transaction, &accepter.string_id, Score::Win).await?;
+                update_user_score(&mut transaction, &challenger.string_id, Score::Loss).await?;
+                update_last_loss(&mut transaction, &challenger.string_id).await?;
 
-                format!("{accepter_name} has won!")
+                format!("{accepter} has won!")
             }
             Ordering::Equal => {
-                update_user_score(&mut transaction, challenger.id.to_string(), Score::Draw).await?;
-                update_user_score(&mut transaction, accepter.id.to_string(), Score::Draw).await?;
+                update_user_score(&mut transaction, &challenger.string_id, Score::Draw).await?;
+                update_user_score(&mut transaction, &accepter.string_id, Score::Draw).await?;
 
                 let timeout_end_time = Utc::now() + chrono::Duration::from_std(TIMEOUT_DURATION)?;
                 let challenger_member = ctx.author_member().await.map(|m| m.into_owned());
@@ -184,28 +119,35 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         };
         transaction.commit().await?;
 
-        interaction.create_interaction_response(ctx, |r| {
-            r.kind(poise::serenity_prelude::InteractionResponseType::UpdateMessage)
-            .interaction_response_data(|d| d.content(
-                format!("{accepter_name} has rolled a {accepter_score} and {challenger_name} has rolled a {challenger_score}. {winner_text}")
-            ).components(|c| c))
-        }).await?;
+        let final_message = format!("{accepter} has rolled a {accepter_score} and {challenger} has rolled a {challenger_score}. {winner_text}");
+        send_interaction_update(ctx, &interaction, final_message).await?;
 
-        let mut duel_data = custom_data_lock.write().await;
-        duel_data.in_progress = false;
+        update_in_progress_status(custom_data_lock, false).await;
 
         return Ok(());
     }
 
+    let duel_timeout_msg = format!("{challenger} failed to find someone to duel.");
     accept_reply
-        .edit(ctx, |f| {
-            f.content(format!("{challenger_name} failed to find someone to duel."))
-                // NOTE: this is how you remove components
-                .components(|c| c)
+        .edit(ctx, |f| f.content(duel_timeout_msg).components(|c| c))
+        .await?;
+
+    update_in_progress_status(custom_data_lock, false).await;
+
+    Ok(())
+}
+
+async fn send_interaction_update(
+    ctx: Context<'_>,
+    interaction: &MessageComponentInteraction,
+    content: impl ToString,
+) -> Result<()> {
+    interaction
+        .create_interaction_response(ctx, |r| {
+            r.kind(InteractionResponseType::UpdateMessage)
+                .interaction_response_data(|d| d.content(content).components(|c| c))
         })
         .await?;
-    let mut duel_data = custom_data_lock.write().await;
-    duel_data.in_progress = false;
 
     Ok(())
 }
@@ -215,37 +157,29 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
 pub async fn duelstats(ctx: Context<'_>) -> Result<()> {
     let user = ctx.author();
     let conn = &mut ctx.data().database.acquire().await?;
-    let stats = get_duel_stats(conn, user.id.to_string()).await?;
 
-    if stats.is_none() {
+    let Some(stats) = get_duel_stats(conn, user.id.to_string()).await? else {
         ephemeral_message(ctx, "You have never dueled before.").await?;
         return Ok(());
-    }
-
-    let stats = stats.unwrap();
-    let current_streak = match (stats.win_streak, stats.loss_streak, stats.draws) {
-        (0, 0, 0) => "You have never dueled before".to_string(),
-        (0, 0, _) => "Your last duel was a draw".to_string(),
-        (0, _, _) => format!("Current streak **{} losses**", stats.loss_streak),
-        (_, 0, _) => format!("Current streak **{} wins**", stats.win_streak),
-        _ => unreachable!(),
     };
-    let best_streak = format!("Best streak: **{} wins**", stats.win_streak_max);
-    let worst_streak = format!("Worst streak: **{} losses**", stats.loss_streak_max);
 
-    let name = name(user, &ctx).await;
+    let name = name(&ctx, user).await;
     let colour = colour(&ctx).await.unwrap_or_else(|| 0x77618F.into());
 
     ctx.send(|r| {
         r.embed(|e| {
             e.colour(colour)
-                .description(format!("{current_streak}\n{best_streak}\n{worst_streak}"))
+                .description(format!(
+                    "{}\n{}\n{}",
+                    stats.current_streak(),
+                    stats.best_streak(),
+                    stats.worst_streak()
+                ))
                 .author(|a| {
-                    a.icon_url(user.avatar_url().unwrap_or_else(|| "".into()))
-                        .name(format!(
-                            "{name}'s scoresheet: {}-{}-{}",
-                            stats.wins, stats.losses, stats.draws
-                        ))
+                    a.icon_url(avatar_url(user)).name(format!(
+                        "{name}'s scoresheet: {}-{}-{}",
+                        stats.wins, stats.losses, stats.draws
+                    ))
                 })
         })
     })
@@ -254,7 +188,7 @@ pub async fn duelstats(ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
-async fn get_last_loss(conn: &mut SqliteConnection, user_id: String) -> Result<NaiveDateTime> {
+async fn get_last_loss(executor: impl SqliteExecutor<'_>, user_id: &str) -> Result<NaiveDateTime> {
     let row = sqlx::query!(
         r#"
         INSERT OR IGNORE INTO User (id) VALUES (?);
@@ -263,26 +197,26 @@ async fn get_last_loss(conn: &mut SqliteConnection, user_id: String) -> Result<N
         user_id,
         user_id
     )
-    .fetch_one(conn)
+    .fetch_one(executor)
     .await?;
 
     Ok(row.last_loss)
 }
 
-async fn update_last_loss(conn: &mut SqliteConnection, user_id: String) -> Result<()> {
+async fn update_last_loss(executor: impl SqliteExecutor<'_>, user_id: &str) -> Result<()> {
     sqlx::query!(
         "UPDATE User SET last_loss = datetime('now') WHERE id = ?",
         user_id
     )
-    .execute(conn)
+    .execute(executor)
     .await?;
 
     Ok(())
 }
 
 async fn update_user_score(
-    conn: &mut SqliteConnection,
-    user_id: String,
+    executor: impl SqliteExecutor<'_>,
+    user_id: &str,
     score: Score,
 ) -> Result<()> {
     let update_query = match score {
@@ -306,12 +240,12 @@ async fn update_user_score(
     };
 
     let mut query = QueryBuilder::new("INSERT OR IGNORE INTO Duels (user_id) VALUES (");
-    query.push_bind(&user_id);
+    query.push_bind(user_id);
     query.push(format!(
         "); UPDATE Duels SET {update_query} WHERE user_id = "
     ));
-    query.push_bind(&user_id);
-    query.build().execute(conn).await?;
+    query.push_bind(user_id);
+    query.build().execute(executor).await?;
 
     Ok(())
 }
@@ -328,13 +262,36 @@ struct DuelStats {
     loss_streak_max: i64,
 }
 
-async fn get_duel_stats(conn: &mut SqliteConnection, user_id: String) -> Result<Option<DuelStats>> {
+impl DuelStats {
+    fn current_streak(&self) -> String {
+        match (self.win_streak, self.loss_streak, self.draws) {
+            (0, 0, 0) => "You have never dueled before".to_string(),
+            (0, 0, _) => "Your last duel was a draw".to_string(),
+            (0, _, _) => format!("Current streak **{} losses**", self.loss_streak),
+            (_, 0, _) => format!("Current streak **{} wins**", self.win_streak),
+            _ => unreachable!(),
+        }
+    }
+
+    fn best_streak(&self) -> String {
+        format!("Best streak: **{} wins**", self.win_streak_max)
+    }
+
+    fn worst_streak(&self) -> String {
+        format!("Worst streak: **{} losses**", self.loss_streak_max)
+    }
+}
+
+async fn get_duel_stats(
+    executor: impl SqliteExecutor<'_>,
+    user_id: String,
+) -> Result<Option<DuelStats>> {
     let stats = sqlx::query_as!(
         DuelStats,
         r#"SELECT * FROM Duels WHERE user_id = ?"#,
         user_id
     )
-    .fetch_optional(conn)
+    .fetch_optional(executor)
     .await?;
 
     Ok(stats)
@@ -351,4 +308,77 @@ async fn timeout_user(ctx: Context<'_>, member: Option<Member>, until: DateTime<
     {
         eprintln!("Failed to timeout {}, reason: {e:?}", member.user.name);
     }
+}
+
+fn unwrap_duel_data(ctx: Context<'_>) -> &RwLock<DuelData> {
+    ctx.command()
+        .custom_data
+        .downcast_ref::<RwLock<DuelData>>()
+        .expect("Expected to have passed a DuelData struct as custom_data")
+}
+
+async fn update_in_progress_status(custom_data_lock: &RwLock<DuelData>, new_status: bool) {
+    let mut cmd_data = custom_data_lock.write().await;
+    cmd_data.in_progress = new_status;
+}
+
+fn create_accept_button() -> CreateActionRow {
+    let mut row = CreateActionRow::default();
+    row.create_button(|f| {
+        f.custom_id("duel-btn")
+            .emoji('🎲')
+            .label("Accept Duel".to_string())
+            .style(ButtonStyle::Primary)
+    });
+
+    row
+}
+
+struct DuelUser {
+    id: UserId,
+    string_id: String,
+    name: String,
+}
+
+impl DuelUser {
+    async fn from(ctx: Context<'_>, user: &User) -> Self {
+        let id = user.id;
+
+        Self {
+            id,
+            string_id: id.to_string(),
+            name: name(&ctx, user).await,
+        }
+    }
+
+    async fn ensure_outside_cooldown(&self, ctx: Context<'_>) -> Result<()> {
+        let last_loss = match get_last_loss(&ctx.data().database, &self.string_id).await {
+            Ok(last_loss) => last_loss,
+            Err(e) => {
+                eprintln!("Could not get {self}'s last loss: {e:?}");
+                bail!("Couldn't get your last loss, no duel for you! :<");
+            }
+        };
+
+        let now = Utc::now().naive_utc();
+
+        let loss_cooldown_duration = chrono::Duration::minutes(LOSS_COOLDOWN);
+        if last_loss + loss_cooldown_duration > now {
+            let time_until_duel = (last_loss + loss_cooldown_duration).timestamp();
+            bail!("{self} you have recently lost a duel. Please try again <t:{time_until_duel}:R>.")
+        }
+
+        Ok(())
+    }
+}
+
+impl Display for DuelUser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
+fn pick_scores() -> (usize, usize) {
+    let mut rng = rand::thread_rng();
+    (rng.gen_range(0..=100), rng.gen_range(0..=100))
 }

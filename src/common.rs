@@ -5,6 +5,7 @@ use poise::ReplyHandle;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rand_seeder::Seeder;
+use serenity::builder::CreateActionRow;
 use std::borrow::Cow;
 use std::sync::Arc;
 
@@ -28,13 +29,22 @@ pub async fn ephemeral_interaction_response<S: AsRef<str>>(
         .await
 }
 
-pub async fn nickname(person: &User, ctx: &Context<'_>) -> Option<String> {
+pub async fn send_message_with_row(
+    ctx: Context<'_>,
+    content: impl Into<String>,
+    row: CreateActionRow,
+) -> Result<ReplyHandle, Error> {
+    ctx.send(|r| r.content(content).components(|c| c.add_action_row(row)))
+        .await
+}
+
+pub async fn nickname(ctx: &Context<'_>, person: &User) -> Option<String> {
     let guild_id = ctx.guild_id()?;
     person.nick_in(ctx, guild_id).await
 }
 
-pub async fn name(person: &User, ctx: &Context<'_>) -> String {
-    nickname(person, ctx)
+pub async fn name(ctx: &Context<'_>, person: &User) -> String {
+    nickname(ctx, person)
         .await
         .unwrap_or_else(|| person.name.clone())
 }
