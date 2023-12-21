@@ -4,8 +4,8 @@ use crate::common::{
 use crate::Context;
 
 use anyhow::Result;
-use chrono::{NaiveDateTime, Utc};
-use poise::serenity_prelude::{ButtonStyle, CreateActionRow};
+use chrono::{DateTime, NaiveDateTime, Utc};
+use poise::serenity_prelude::{ButtonStyle, CreateActionRow, Member};
 use rand::Rng;
 use sqlx::{Connection, QueryBuilder, SqliteConnection};
 use std::cmp::Ordering;
@@ -173,19 +173,10 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
                 update_user_score(&mut transaction, challenger.id.to_string(), Score::Draw).await?;
                 update_user_score(&mut transaction, accepter.id.to_string(), Score::Draw).await?;
 
-                // NOTE: interaction fails if the user is the owner of the server
                 let timeout_end_time = Utc::now() + chrono::Duration::from_std(TIMEOUT_DURATION)?;
-                if let Some(mut challenger_as_member) = member(&ctx).await {
-                    challenger_as_member
-                        .to_mut()
-                        .disable_communication_until_datetime(ctx, timeout_end_time.into())
-                        .await?;
-                };
-                if let Some(mut accepter_as_member) = interaction.member.clone() {
-                    accepter_as_member
-                        .disable_communication_until_datetime(ctx, timeout_end_time.into())
-                        .await?;
-                };
+                let challenger_member = ctx.author_member().await.map(|m| m.into_owned());
+                timeout_user(ctx, challenger_member, timeout_end_time).await;
+                timeout_user(ctx, interaction.member.clone(), timeout_end_time).await;
 
                 "It's a draw! Now go sit in a corner for 10 mintues and think about your actions..."
                     .into()
@@ -347,4 +338,17 @@ async fn get_duel_stats(conn: &mut SqliteConnection, user_id: String) -> Result<
     .await?;
 
     Ok(stats)
+}
+
+async fn timeout_user(ctx: Context<'_>, member: Option<Member>, until: DateTime<Utc>) {
+    let Some(mut member) = member else {
+        return;
+    };
+
+    if let Err(e) = member
+        .disable_communication_until_datetime(ctx, until.into())
+        .await
+    {
+        eprintln!("Failed to timeout {}, reason: {e:?}", member.user.name);
+    }
 }
