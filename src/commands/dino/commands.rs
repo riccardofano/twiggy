@@ -133,7 +133,7 @@ impl Timings {
     }
 
     fn ensure_outside_cooldown(&self) -> Result<()> {
-        if self.reset > self.attempt {
+        if self.attempt > self.reset {
             match self.kind {
                 UserAction::Hatch(_) => bail!(
                     "Dont be greedy! You can hatch again <t:{}:R>.",
