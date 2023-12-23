@@ -96,6 +96,13 @@ async fn event_event_handler(
     if let poise::Event::Ready { data_about_bot } = event {
         println!("{} is connected!", data_about_bot.user.name);
 
+        // Remove commands that don't belong to this bot.
+        for guild_id in ctx.cache.guilds() {
+            guild_id
+                .set_application_commands(&ctx.http, |commands| commands)
+                .await?;
+        }
+
         tokio::select! {
             _ = setup_rpg_summary(ctx, user_data) => {}
             _ = setup_dino_collector(ctx, user_data) => {}
