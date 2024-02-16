@@ -9,7 +9,7 @@ use crate::common::{
 };
 use crate::Context;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use chrono::{NaiveDateTime, Utc};
 use poise::serenity_prelude::{self as serenity, Mention, User, UserId};
 use poise::serenity_prelude::{ButtonStyle, CreateActionRow};
@@ -222,7 +222,7 @@ fn assert_no_recent_loss(stats: &CharacterPastStats, name: &str) -> Result<()> {
     if stats.last_loss + loss_cooldown_duration > now {
         let time_until_duel = (stats.last_loss + loss_cooldown_duration).timestamp();
 
-        return Err(anyhow::anyhow!(
+        bail!(
             "{name} you have recently lost a duel. Please try again <t:{time_until_duel}:R>."
         ));
     }
