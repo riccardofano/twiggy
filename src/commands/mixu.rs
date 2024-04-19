@@ -7,6 +7,8 @@ use tokio::sync::OnceCell;
 
 const MIXU_BANNER: &str =
     ":regional_indicator_m::regional_indicator_i::regional_indicator_x::regional_indicator_u:";
+const MIKU_BANNER: &str =
+    ":regional_indicator_m::regional_indicator_i::regional_indicator_k::regional_indicator_u:";
 const MIXU_POSITIONS: [usize; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 static MIXU_PIECES: OnceCell<Vec<Emoji>> = OnceCell::const_new();
 
@@ -22,6 +24,20 @@ pub async fn mixu(ctx: Context<'_>) -> Result<()> {
     let mixu = stringify_mixu(pieces, &positions, MIXU_BANNER);
 
     ctx.say(mixu).await?;
+
+    Ok(())
+}
+
+/// Have Miku stare into your soul
+#[poise::command(slash_command, prefix_command)]
+pub async fn mikustare(ctx: Context<'_>) -> Result<()> {
+    let positions = MIXU_POSITIONS;
+    let pieces = MIXU_PIECES
+        .get_or_try_init(|| retrieve_mixu_emojis(ctx))
+        .await?;
+    let miku = stringify_mixu(pieces, &positions, MIKU_BANNER);
+
+    ctx.say(miku).await?;
 
     Ok(())
 }

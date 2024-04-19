@@ -45,6 +45,7 @@ async fn main() {
                 sudoku(),
                 quote(),
                 mixu(),
+                mikustare(),
             ],
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some(String::from(">")),
