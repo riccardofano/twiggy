@@ -94,9 +94,13 @@ struct Timings {
 
 impl Timings {
     fn hatch(user_record: &UserRecord) -> Self {
-        let attempt = user_record.last_hatch;
-        let reset_time = Utc::now().naive_utc().date().and_hms_opt(0, 0, 0).unwrap();
-        let next_try = (reset_time + chrono::Duration::days(1)).timestamp();
+        let attempt = Utc::now().naive_utc();
+        let last_hatch_date = user_record.last_hatch.date();
+        // At midnight the day after the last hatch
+        let reset_time = last_hatch_date.and_hms_opt(0, 0, 0).unwrap() + chrono::Duration::days(1);
+        // At midnight the day after this most recent attempt
+        let next_try =
+            (attempt.date().and_hms_opt(0, 0, 0).unwrap() + chrono::Duration::days(1)).timestamp();
 
         Timings {
             attempt,

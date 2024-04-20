@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::time::Duration;
 
-use anyhow::Context as Ctx;
+use anyhow::{bail, Context as Ctx};
 use chrono::{NaiveDateTime, Utc};
 use poise::serenity_prelude::{Member, Mention, Mutex, Role};
 use rand::Rng;
@@ -41,7 +41,7 @@ async fn change(
 
     let Some(color) = to_color(&hexcode) else {
         ephemeral_message(ctx, "Please provide a valid hex color code.").await?;
-        return Ok(())
+        return Ok(());
     };
 
     let Some(member) = ctx.author_member().await else {
@@ -82,7 +82,7 @@ async fn random(ctx: Context<'_>) -> Result<()> {
 
     let Some(member) = ctx.author_member().await else {
         ephemeral_message(ctx, "I could not find your roles.").await?;
-        return Ok(())
+        return Ok(());
     };
 
     if let Err(reason) = reject_non_subs(&member).await {
@@ -121,7 +121,7 @@ async fn gamble(ctx: Context<'_>) -> Result<()> {
 
     let Some(member) = ctx.author_member().await else {
         ephemeral_message(ctx, "I could not find your roles").await?;
-        return Ok(())
+        return Ok(());
     };
 
     if let Err(reason) = reject_non_subs(&member).await {
@@ -170,7 +170,7 @@ async fn change_color(
     color: Option<u32>,
 ) -> Result<String> {
     let Some(guild) = ctx.guild() else {
-        return Err(anyhow::anyhow!("Could not find the guild guild where to assign a new color role."));
+        bail!("Could not find the guild guild where to assign a new color role.");
     };
 
     let color = color.unwrap_or_else(generate_random_hex_color);
@@ -179,9 +179,12 @@ async fn change_color(
         Some(role) => role.clone(),
         None => {
             let Some(anchor_role) = guild.roles.get(&ANCHOR_ROLE_ID.into()) else {
-                return Err(anyhow::anyhow!("The anchor role was not found, \
-                unable to create a role with at the correct position."))
+                bail!(
+                    "The anchor role was not found, \
+                unable to create a role with at the correct position."
+                );
             };
+
             guild
                 .create_role(ctx, |role| {
                     role.name(&role_name)
@@ -205,7 +208,7 @@ pub async fn favorite(
 ) -> Result<()> {
     let Some(color) = to_color(&hexcode) else {
         ephemeral_message(ctx, "Please provide a valid hex color code.").await?;
-        return Ok(())
+        return Ok(());
     };
     let color_code = format!("#{color:06X}");
     let author_id = ctx.author().id.to_string();
@@ -262,15 +265,16 @@ pub async fn lazy(ctx: Context<'_>) -> Result<()> {
         ephemeral_message(
             ctx,
             "You're so lazy you haven't even set a favorite color, \
-            set one for next time!"
-        ).await?;
+            set one for next time!",
+        )
+        .await?;
 
         return Ok(());
     };
 
     let Some(author_member) = ctx.author_member().await else {
         ephemeral_message(ctx, "Are you not in a guild right now?").await?;
-        return Ok(())
+        return Ok(());
     };
 
     let Some(color) = to_color(&color_code) else {
@@ -364,7 +368,7 @@ async fn is_role_unused(ctx: Context<'_>, role: &Role) -> Result<bool> {
     let members = role.guild_id.members(ctx, None, None).await?;
     for member in members {
         let Some(roles) = member.roles(ctx) else {
-            continue
+            continue;
         };
         if roles.contains(role) {
             return Ok(false);
@@ -376,7 +380,7 @@ async fn is_role_unused(ctx: Context<'_>, role: &Role) -> Result<bool> {
 
 async fn remove_unused_color_roles(ctx: Context<'_>, member: &mut Cow<'_, Member>) -> Result<bool> {
     let Some(roles) = member.roles(ctx) else {
-        return Ok(false)
+        return Ok(false);
     };
 
     let mut roles_were_removed = false;
@@ -438,17 +442,17 @@ async fn reject_on_cooldown(ctx: Context<'_>) -> Result<()> {
     let permitted_time_from_loss = row.last_loss + cooldown_duration;
 
     if permitted_time_from_random > now {
-        return Err(anyhow::anyhow!(
+        bail!(
             "You recently randomed/gambled, you can change your color <t:{}:R>",
             permitted_time_from_random.timestamp()
-        ));
+        );
     }
 
     if permitted_time_from_loss > now {
-        return Err(anyhow::anyhow!(
+        bail!(
             "You recently dueled and lost, you can change your color <t:{}:R>",
             permitted_time_from_loss.timestamp()
-        ));
+        );
     }
 
     Ok(())
@@ -456,7 +460,7 @@ async fn reject_on_cooldown(ctx: Context<'_>) -> Result<()> {
 
 async fn reject_non_subs(member: &Member) -> Result<()> {
     if !member.roles.contains(&SUB_ROLE_ID.into()) {
-        return Err(anyhow::anyhow!("Yay! You get to keep your white color!"));
+        bail!("Yay! You get to keep your white color!");
     }
 
     Ok(())
