@@ -56,7 +56,7 @@ async fn generate_message(ctx: &Context<'_>, quote_id: Option<u64>) -> Result<St
 
     let quotes = &ctx.data().quote_data.read().await.cache;
     if quotes.is_empty() {
-        bail!("Could not retrieve any quotes"));
+        bail!("Could not retrieve any quotes");
     }
 
     let quote = match quote_id {
