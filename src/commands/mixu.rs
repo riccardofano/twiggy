@@ -1,8 +1,12 @@
+use std::sync::atomic::{AtomicI64, Ordering};
+
 use crate::{Context, Result};
 
 use anyhow::anyhow;
 use poise::serenity_prelude::Emoji;
 use rand::{seq::SliceRandom, thread_rng};
+use serenity::futures::TryFutureExt;
+use sqlx::SqlitePool;
 use tokio::sync::OnceCell;
 
 const MIXU_BANNER: &str =
@@ -11,6 +15,14 @@ const MIKU_BANNER: &str =
     ":regional_indicator_m::regional_indicator_i::regional_indicator_k::regional_indicator_u:";
 const MIKU_POSITIONS: [usize; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 static MIXU_PIECES: OnceCell<Vec<Emoji>> = OnceCell::const_new();
+
+pub async fn initialize_best_mixu_score(db: &SqlitePool) -> Result<Option<AtomicI64>> {
+    let row = sqlx::query!("SELECT score FROM BestMixu ORDER BY rowid DESC LIMIT 1")
+        .fetch_optional(db)
+        .await?;
+
+    Ok(row.map(|r| r.score.into()))
+}
 
 /// Generate a random mixu
 #[poise::command(slash_command, prefix_command)]
@@ -22,8 +34,12 @@ pub async fn mixu(ctx: Context<'_>) -> Result<()> {
         .get_or_try_init(|| retrieve_mixu_emojis(ctx))
         .await?;
     let mixu = stringify_mixu(pieces, &positions, MIXU_BANNER);
+    let score = count_points(&positions);
 
-    ctx.say(mixu).await?;
+    tokio::try_join!(
+        update_max_score(ctx, score),
+        ctx.say(mixu).map_err(anyhow::Error::msg)
+    )?;
 
     Ok(())
 }
@@ -102,6 +118,25 @@ fn count_points(tiles: &[usize; 16]) -> i64 {
     count as i64
 }
 
+async fn update_max_score(ctx: Context<'_>, score: i64) -> Result<()> {
+    let best_mixu_score = ctx.data().best_mixu.load(Ordering::Relaxed);
+    if score <= best_mixu_score {
+        return Ok(());
+    }
+
+    let user_id = ctx.author().id.0 as i64;
+    sqlx::query!(
+        "INSERT INTO BestMixu (user_id, score) VALUES (?, ?)",
+        user_id,
+        score
+    )
+    .execute(&ctx.data().database)
+    .await?;
+
+    ctx.data().best_mixu.store(score, Ordering::Relaxed);
+
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
