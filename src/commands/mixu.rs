@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use crate::{Context, Result};
 
 use anyhow::anyhow;
-use poise::serenity_prelude::Emoji;
+use poise::serenity_prelude::{Emoji, Mention, UserId};
 use rand::{seq::SliceRandom, thread_rng};
 use serenity::futures::TryFutureExt;
 use sqlx::SqlitePool;
@@ -37,7 +37,7 @@ pub async fn mixu(ctx: Context<'_>) -> Result<()> {
     let score = count_points(&positions);
 
     tokio::try_join!(
-        update_max_score(ctx, score),
+        update_max_score(ctx, score, &positions),
         ctx.say(mixu).map_err(anyhow::Error::msg)
     )?;
 
@@ -57,7 +57,39 @@ pub async fn mikustare(ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
-fn stringify_mixu(pieces: &[Emoji], positions: &[usize; 16], banner: &str) -> String {
+/// See who sits on top of the mixu leaderboard
+#[poise::command(slash_command, prefix_command)]
+pub async fn bestmixu(ctx: Context<'_>) -> Result<()> {
+    let record = sqlx::query!("SELECT user_id, tiles FROM BestMixu ORDER BY rowid DESC LIMIT 1")
+        .fetch_optional(&ctx.data().database)
+        .await?;
+
+    let Some((user_id, tiles)) = record.map(|r| (r.user_id, r.tiles)) else {
+        ctx.say("The best Mixu is yet to come").await?;
+        return Ok(());
+    };
+
+    let tiles = tiles
+        .split(',')
+        .map(str::parse)
+        .collect::<Result<Vec<usize>, _>>()?;
+
+    let pieces = MIXU_PIECES
+        .get_or_try_init(|| retrieve_mixu_emojis(ctx))
+        .await?;
+    let message = stringify_mixu(pieces, &tiles, MIXU_BANNER);
+
+    ctx.say(format!(
+        "Best mixu by {}",
+        Mention::User(UserId(user_id as u64))
+    ))
+    .await?;
+    ctx.say(message).await?;
+
+    Ok(())
+}
+
+fn stringify_mixu(pieces: &[Emoji], positions: &[usize], banner: &str) -> String {
     let mut output = String::with_capacity(128);
     output.push_str(banner);
 
@@ -89,7 +121,7 @@ async fn retrieve_mixu_emojis(ctx: Context<'_>) -> Result<Vec<Emoji>> {
     Ok(miku_emoji_ids)
 }
 
-fn count_points(tiles: &[usize; 16]) -> i64 {
+fn count_points(tiles: &[usize]) -> i64 {
     let mut count = 0;
     for row in 0..4 {
         for col in 0..4 {
@@ -118,17 +150,24 @@ fn count_points(tiles: &[usize; 16]) -> i64 {
     count as i64
 }
 
-async fn update_max_score(ctx: Context<'_>, score: i64) -> Result<()> {
+async fn update_max_score(ctx: Context<'_>, score: i64, tiles: &[usize]) -> Result<()> {
     let best_mixu_score = ctx.data().best_mixu.load(Ordering::Relaxed);
     if score <= best_mixu_score {
         return Ok(());
     }
 
+    let tiles = tiles
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+
     let user_id = ctx.author().id.0 as i64;
     sqlx::query!(
-        "INSERT INTO BestMixu (user_id, score) VALUES (?, ?)",
+        "INSERT INTO BestMixu (user_id, score, tiles) VALUES (?, ?, ?)",
         user_id,
-        score
+        score,
+        tiles
     )
     .execute(&ctx.data().database)
     .await?;

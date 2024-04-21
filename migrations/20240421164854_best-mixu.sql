@@ -2,5 +2,6 @@
 CREATE TABLE BestMixu (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     user_id INTEGER NOT NULL,
-    score INTEGER NOT NULL
+    score INTEGER NOT NULL,
+    tiles TEXT NOT NULL
 );

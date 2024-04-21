@@ -51,6 +51,7 @@ async fn main() {
             sudoku(),
             quote(),
             mixu(),
+            bestmixu(),
             mikustare(),
         ],
         prefix_options: poise::PrefixFrameworkOptions {
