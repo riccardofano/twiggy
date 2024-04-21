@@ -21,18 +21,10 @@ pub struct Quote {
     body: String,
 }
 
+#[derive(Default)]
 pub struct QuoteData {
     cache: Vec<Quote>,
     last_updated: NaiveDateTime,
-}
-
-impl QuoteData {
-    pub fn new() -> Self {
-        Self {
-            cache: Vec::new(),
-            last_updated: NaiveDateTime::MIN,
-        }
-    }
 }
 
 /// Get a random or specific quote

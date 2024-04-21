@@ -68,7 +68,7 @@ async fn main() {
                 Ok(Data {
                     database,
                     rpg_summary_cache: Mutex::new(LruCache::new(NonZeroUsize::new(10).unwrap())),
-                    quote_data: RwLock::new(QuoteData::new()),
+                    quote_data: RwLock::default(),
                 })
             })
         });
