@@ -99,10 +99,15 @@ pub async fn rps(ctx: Context<'_>) -> Result<()> {
         interaction.get_interaction_response(ctx)
     )?;
 
-    let (challenger_choice, accepter_choice) = tokio::try_join!(
+    let (Some(challenger_choice), Some(accepter_choice)) = tokio::try_join!(
         get_user_weapon_choice(ctx, challenger_msg.id.0, challenger.id.0),
         get_user_weapon_choice(ctx, accepter_msg.id.0, accepter.id.0)
-    )?;
+    )?
+    else {
+        let msg = "Someone didn't pick their weapon in time :(";
+        first_message.edit(ctx, |m| m.content(msg)).await?;
+        return Ok(());
+    };
 
     let mut end_msg = format!(
         "{challenger} picks {}, {accepter} picks {}\n",
@@ -150,24 +155,26 @@ async fn get_user_weapon_choice(
     ctx: Context<'_>,
     message_id: u64,
     author_id: u64,
-) -> Result<Weapon> {
-    let mut collector = ComponentInteractionCollectorBuilder::new(ctx)
+) -> Result<Option<Weapon>> {
+    let weapon_button_interaction = CollectComponentInteraction::new(ctx)
         .message_id(message_id)
-        .timeout(std::time::Duration::from_secs(600))
+        .timeout(CHOICE_TIMEOUT)
         .collect_limit(1)
         .filter(move |f| {
             f.user.id.0 == author_id
                 && [ROCK_BTN, PAPER_BTN, SCISSORS_BTN].contains(&f.data.custom_id.as_str())
         })
-        .build();
+        .await;
 
-    let weapon_button_interaction = collector
-        .next()
-        .await
-        .ok_or(anyhow::anyhow!("Button press error"))?;
+    let Some(weapon_button_interaction) = weapon_button_interaction else {
+        // Collector timed out
+        return Ok(None);
+    };
 
     send_interaction_update(ctx, &weapon_button_interaction, "Great choice!").await?;
-    Weapon::from_str(&weapon_button_interaction.data.custom_id)
+    let weapon = Weapon::from_str(&weapon_button_interaction.data.custom_id)?;
+
+    Ok(Some(weapon))
 }
 
 fn create_accept_button() -> CreateActionRow {
