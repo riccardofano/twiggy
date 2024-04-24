@@ -7,7 +7,7 @@ use crate::{
     Context,
 };
 use anyhow::{bail, Result};
-use poise::serenity_prelude::{ButtonStyle, InteractionResponseType, ReactionType};
+use poise::serenity_prelude::{ButtonStyle, ReactionType};
 use serenity::{
     builder::CreateActionRow, collector::ComponentInteractionCollectorBuilder, futures::StreamExt,
 };
@@ -43,14 +43,19 @@ impl FromStr for Weapon {
 
     fn from_str(s: &str) -> std::prelude::v1::Result<Self, Self::Err> {
         let choice = match s {
-            "rps-rock" => Self::Rock,
-            "rps-paper" => Self::Paper,
-            "rps-scissors" => Self::Scissors,
+            ROCK_BTN => Self::Rock,
+            PAPER_BTN => Self::Paper,
+            SCISSORS_BTN => Self::Scissors,
             _ => bail!("Invalid weapon choice"),
         };
         Ok(choice)
     }
 }
+
+const ACCEPT_BTN: &str = "rps-accept";
+const ROCK_BTN: &str = "rps-rock";
+const PAPER_BTN: &str = "rps-paper";
+const SCISSORS_BTN: &str = "rps-scissors";
 
 /// Challenge someone to a rock paper scissors battle
 #[poise::command(slash_command)]
@@ -66,7 +71,7 @@ pub async fn rps(ctx: Context<'_>) -> Result<()> {
         .timeout(Duration::from_secs(600))
         .await
     {
-        if interaction.data.custom_id != "rps-btn" {
+        if interaction.data.custom_id != ACCEPT_BTN {
             continue;
         }
 
@@ -143,7 +148,7 @@ async fn get_user_weapon_choice(
         .collect_limit(1)
         .filter(move |f| {
             f.user.id.0 == author_id
-                && ["rps-rock", "rps-paper", "rps-scissors"].contains(&f.data.custom_id.as_str())
+                && [ROCK_BTN, PAPER_BTN, SCISSORS_BTN].contains(&f.data.custom_id.as_str())
         })
         .build();
 
@@ -159,7 +164,7 @@ async fn get_user_weapon_choice(
 fn create_accept_button() -> CreateActionRow {
     let mut row = CreateActionRow::default();
     row.create_button(|f| {
-        f.custom_id("rps-btn")
+        f.custom_id(ACCEPT_BTN)
             .emoji('💪')
             .label("Accept Battle".to_string())
             .style(ButtonStyle::Primary)
@@ -171,19 +176,19 @@ fn create_accept_button() -> CreateActionRow {
 fn create_weapons_buttons() -> CreateActionRow {
     let mut row = CreateActionRow::default();
     row.create_button(|f| {
-        f.custom_id("rps-rock")
+        f.custom_id(ROCK_BTN)
             .emoji('🪨')
             .label("Rock")
             .style(ButtonStyle::Primary)
     });
     row.create_button(|f| {
-        f.custom_id("rps-paper")
+        f.custom_id(PAPER_BTN)
             .emoji('🧻')
             .label("Paper")
             .style(ButtonStyle::Primary)
     });
     row.create_button(|f| {
-        f.custom_id("rps-scissors")
+        f.custom_id(SCISSORS_BTN)
             .emoji(ReactionType::Unicode("✂️".to_owned()))
             .label("Scissors")
             .style(ButtonStyle::Primary)
