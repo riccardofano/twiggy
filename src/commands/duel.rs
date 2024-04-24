@@ -1,15 +1,12 @@
 use crate::common::{
     avatar_url, colour, ephemeral_interaction_response, ephemeral_message, name,
-    send_message_with_row, Score,
+    send_interaction_update, send_message_with_row, Score,
 };
 use crate::Context;
 
 use anyhow::{bail, Result};
 use chrono::{DateTime, NaiveDateTime, Utc};
-use poise::serenity_prelude::{
-    ButtonStyle, CreateActionRow, InteractionResponseType, Member, MessageComponentInteraction,
-    User, UserId,
-};
+use poise::serenity_prelude::{ButtonStyle, CreateActionRow, Member, User, UserId};
 use rand::Rng;
 use sqlx::{Connection, QueryBuilder, SqliteExecutor};
 use std::cmp::Ordering;
@@ -133,21 +130,6 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         .await?;
 
     update_in_progress_status(custom_data_lock, false).await;
-
-    Ok(())
-}
-
-async fn send_interaction_update(
-    ctx: Context<'_>,
-    interaction: &MessageComponentInteraction,
-    content: impl ToString,
-) -> Result<()> {
-    interaction
-        .create_interaction_response(ctx, |r| {
-            r.kind(InteractionResponseType::UpdateMessage)
-                .interaction_response_data(|d| d.content(content).components(|c| c))
-        })
-        .await?;
 
     Ok(())
 }

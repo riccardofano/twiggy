@@ -1,6 +1,8 @@
 use crate::Context;
 
-use poise::serenity_prelude::{Colour, Error, Member, MessageComponentInteraction, User};
+use poise::serenity_prelude::{
+    Colour, Error, InteractionResponseType, Member, MessageComponentInteraction, User,
+};
 use poise::ReplyHandle;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -27,6 +29,21 @@ pub async fn ephemeral_interaction_response<S: AsRef<str>>(
             r.interaction_response_data(|d| d.content(content.as_ref()).ephemeral(true))
         })
         .await
+}
+
+pub async fn send_interaction_update(
+    ctx: Context<'_>,
+    interaction: &MessageComponentInteraction,
+    content: impl ToString,
+) -> anyhow::Result<()> {
+    interaction
+        .create_interaction_response(ctx, |r| {
+            r.kind(InteractionResponseType::UpdateMessage)
+                .interaction_response_data(|d| d.content(content).components(|c| c))
+        })
+        .await?;
+
+    Ok(())
 }
 
 pub async fn send_message_with_row(

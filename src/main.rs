@@ -53,6 +53,7 @@ async fn main() {
             mixu(),
             bestmixu(),
             mikustare(),
+            rps(),
         ],
         prefix_options: poise::PrefixFrameworkOptions {
             prefix: Some(String::from(">")),
