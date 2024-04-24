@@ -1,4 +1,4 @@
-use std::{str::FromStr, sync::Arc};
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 use crate::{
     common::{
@@ -8,9 +8,7 @@ use crate::{
 };
 use anyhow::{bail, Result};
 use poise::serenity_prelude::{ButtonStyle, MessageComponentInteraction, ReactionType};
-use serenity::{
-    builder::CreateActionRow, collector::ComponentInteractionCollectorBuilder, futures::StreamExt,
-};
+use serenity::{builder::CreateActionRow, collector::CollectComponentInteraction};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Weapon {
@@ -57,6 +55,9 @@ const ROCK_BTN: &str = "rps-rock";
 const PAPER_BTN: &str = "rps-paper";
 const SCISSORS_BTN: &str = "rps-scissors";
 
+const ACCEPT_TIMEOUT: Duration = Duration::from_secs(600);
+const CHOICE_TIMEOUT: Duration = Duration::from_secs(300);
+
 /// Challenge someone to a rock paper scissors battle
 #[poise::command(slash_command)]
 pub async fn rps(ctx: Context<'_>) -> Result<()> {
@@ -66,11 +67,9 @@ pub async fn rps(ctx: Context<'_>) -> Result<()> {
     let message_id = first_message.message().await?.id;
 
     let Some(interaction) = find_opponent(ctx, message_id.0, challenger.id.0).await else {
+        let timeout_message = format!("Nobody was brave enough to challenge {challenger}");
         first_message
-            .edit(ctx, |m| {
-                m.content(format!("Nobody was brave enough to challenge {challenger}"))
-                    .components(|c| c)
-            })
+            .edit(ctx, |m| m.content(timeout_message).components(|c| c))
             .await?;
 
         return Ok(());
@@ -128,13 +127,12 @@ async fn find_opponent(
     message_id: u64,
     challenger_id: u64,
 ) -> Option<Arc<MessageComponentInteraction>> {
-    let mut collector = ComponentInteractionCollectorBuilder::new(ctx)
+    while let Some(interaction) = CollectComponentInteraction::new(ctx)
+        .timeout(ACCEPT_TIMEOUT)
         .message_id(message_id)
-        .timeout(std::time::Duration::from_secs(600))
         .filter(move |f| f.data.custom_id == ACCEPT_BTN)
-        .build();
-
-    while let Some(interaction) = collector.next().await {
+        .await
+    {
         if interaction.user.id == challenger_id {
             ephemeral_interaction_response(&ctx, interaction, "You cannot fight yourself.")
                 .await
