@@ -1,6 +1,7 @@
 /.vscode
 /target
 *.sqlite*
+.env
 
 # Ignore all dinos created there but the directory should always exist
 /assets/dino/complete/*

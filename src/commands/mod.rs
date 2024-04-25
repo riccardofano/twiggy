@@ -1,3 +1,4 @@
+mod ask;
 mod colors;
 mod dino;
 mod duel;
@@ -8,6 +9,7 @@ mod rockpaperscissors;
 mod rpg;
 mod sudoku;
 
+pub use ask::*;
 pub use colors::*;
 pub use dino::*;
 pub use duel::*;

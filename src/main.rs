@@ -54,6 +54,7 @@ async fn main() {
             bestmixu(),
             mikustare(),
             rps(),
+            ask(),
         ],
         prefix_options: poise::PrefixFrameworkOptions {
             prefix: Some(String::from(">")),
@@ -66,6 +67,10 @@ async fn main() {
         on_error: |err| Box::pin(on_error(err)),
         ..Default::default()
     };
+
+    if std::env::var("WOLFRAM_APP_ID").is_err() {
+        eprintln!("[WARNING] The /ask command does not work without a Wolfram Alpha App ID, set WOLFRAM_APP_ID as an env variable.");
+    }
 
     let framework = poise::Framework::builder()
         .options(options)
