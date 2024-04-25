@@ -1,6 +1,6 @@
 # Rust port of [TwiggyBot](https://github.com/Brexbot/TwiggyBot) just for fun
 
-I was curious to see what the bot would look like in Rust, after someone mentioned the "rewrite it in rust" meme for the bot.  
+I was curious to see what the bot would look like in Rust, after someone mentioned the "rewrite it in rust" meme for the bot.
 I'm pretty surprised by the result, I honestly expected it to be a lot more verbose.
 
 ## How to run
@@ -38,3 +38,9 @@ cargo run
 # or in the release mode if you're a try-hard
 cargo run --release
 ```
+
+## Extra commands
+
+To use the /ask command you need to set `WOLFRAM_APP_ID` to a valid Wolfram Alpha APP ID in the environment variables.
+
+You can get one here: https://developer.wolframalpha.com/
