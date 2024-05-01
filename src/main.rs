@@ -16,6 +16,7 @@ pub struct Data {
     rpg_summary_cache: Mutex<LruCache<u64, String>>,
     quote_data: RwLock<QuoteData>,
     best_mixu: AtomicI64,
+    simple_commands: RwLock<SimpleCommands>,
 }
 pub type Context<'a> = poise::Context<'a, Data, anyhow::Error>;
 pub type Error = anyhow::Error;
@@ -55,6 +56,7 @@ async fn main() {
             mikustare(),
             rps(),
             ask(),
+            commands(),
         ],
         prefix_options: poise::PrefixFrameworkOptions {
             prefix: Some(String::from(">")),
@@ -85,6 +87,7 @@ async fn main() {
                     database,
                     rpg_summary_cache: Mutex::new(LruCache::new(NonZeroUsize::new(10).unwrap())),
                     quote_data: RwLock::default(),
+                    simple_commands: RwLock::default(),
                     best_mixu,
                 })
             })
@@ -112,20 +115,36 @@ async fn event_event_handler(
     _framework: poise::FrameworkContext<'_, Data, Error>,
     user_data: &Data,
 ) -> Result<(), Error> {
-    if let poise::Event::Ready { data_about_bot } = event {
-        println!("{} is connected!", data_about_bot.user.name);
+    match event {
+        poise::Event::Ready { data_about_bot } => {
+            println!("{} is connected!", data_about_bot.user.name);
 
-        // Remove commands that don't belong to this bot.
-        for guild_id in ctx.cache.guilds() {
-            guild_id
-                .set_application_commands(&ctx.http, |commands| commands)
-                .await?;
-        }
+            // Remove commands that don't belong to this bot.
+            for guild_id in ctx.cache.guilds() {
+                guild_id
+                    .set_application_commands(&ctx.http, |commands| commands)
+                    .await?;
+            }
 
-        tokio::select! {
-            _ = setup_rpg_summary(ctx, user_data) => {}
-            _ = setup_dino_collector(ctx, user_data) => {}
+            tokio::select! {
+                _ = setup_rpg_summary(ctx, user_data) => {}
+                _ = setup_dino_collector(ctx, user_data) => {}
+            }
         }
+        poise::Event::InteractionCreate { interaction } => {
+            let interaction = interaction.clone();
+            let map = user_data.simple_commands.read().await;
+            let command = interaction.application_command().unwrap();
+
+            if let Some(text) = map.get(&command.data.name) {
+                command
+                    .create_interaction_response(ctx, |r| {
+                        r.interaction_response_data(|d| d.content(text))
+                    })
+                    .await?;
+            };
+        }
+        _ => {}
     }
 
     Ok(())
