@@ -19,42 +19,13 @@ pub async fn commands(_ctx: Context<'_>) -> Result<()> {
 pub async fn add(
     ctx: Context<'_>,
     #[description = "The name of the command"] name: String,
-    #[description = "What the command should say"] text: String,
+    #[description = "What the command should say"] content: String,
 ) -> Result<()> {
-    if !name.chars().all(|c| c.is_ascii_alphanumeric()) {
-        ephemeral_message(ctx, "Command name must be a single word.").await?;
-        return Ok(());
-    };
+    ensure_single_word(ctx, &name).await?;
+    ensure_not_default_command(ctx, &name).await?;
 
-    if DEFAULT_COMMANDS
-        .get()
-        .expect("Expected default commands to be initialized.")
-        .iter()
-        .any(|n| n == &name)
-    {
-        ephemeral_message(
-            ctx,
-            "Cannot add command with that name because it's already taken by a default command.",
-        )
-        .await?;
-        return Ok(());
-    }
-
-    let mut map = ctx.data().simple_commands.write().await;
-    let Entry::Vacant(entry) = map.entry(name.clone()) else {
-        ephemeral_message(ctx, "The command already exists.").await?;
-        return Ok(());
-    };
-
-    entry.insert(text);
-    drop(map);
-
-    let guild = ctx
-        .guild()
-        .expect("Expected /commands add to be guild only.");
-    guild
-        .create_application_command(ctx, |c| c.name(name).description("A simple text command"))
-        .await?;
+    insert_command(ctx, &name, &content).await?;
+    register_command(ctx, name).await?;
 
     ephemeral_message(ctx, "Command added").await?;
 
@@ -65,16 +36,9 @@ pub async fn add(
 pub async fn edit(
     ctx: Context<'_>,
     #[description = "The name of the command"] name: String,
-    #[description = "What the command should say"] text: String,
+    #[description = "What the command should say"] content: String,
 ) -> Result<()> {
-    let mut map = ctx.data().simple_commands.write().await;
-
-    let Some(entry) = map.get_mut(&name) else {
-        ephemeral_message(ctx, "The command does not exist.").await?;
-        return Ok(());
-    };
-    *entry = text;
-
+    update_command(ctx, &name, &content).await?;
     ephemeral_message(ctx, "The command has been updated.").await?;
 
     Ok(())
@@ -85,13 +49,60 @@ pub async fn remove(
     ctx: Context<'_>,
     #[description = "The name of the command"] name: String,
 ) -> Result<()> {
+    delete_command(ctx, &name).await?;
+    unregister_command(ctx, &name).await?;
+
+    ephemeral_message(ctx, "The command has been removed.").await?;
+
+    Ok(())
+}
+
+async fn insert_command(ctx: Context<'_>, name: &str, content: &str) -> Result<()> {
     let mut map = ctx.data().simple_commands.write().await;
-    let Some(_) = map.remove(&name) else {
+    let Entry::Vacant(entry) = map.entry(name.to_owned()) else {
+        // TODO: Should this be outside?
+        ephemeral_message(ctx, "The command already exists.").await?;
+        return Ok(());
+    };
+
+    entry.insert(content.to_owned());
+
+    // TODO: save to db
+
+    Ok(())
+}
+async fn update_command(ctx: Context<'_>, name: &str, content: &str) -> Result<()> {
+    let mut map = ctx.data().simple_commands.write().await;
+
+    let Some(entry) = map.get_mut(name) else {
         ephemeral_message(ctx, "The command does not exist.").await?;
         return Ok(());
     };
-    drop(map);
+    *entry = content.to_owned();
 
+    Ok(())
+}
+async fn delete_command(ctx: Context<'_>, name: &str) -> Result<()> {
+    let mut map = ctx.data().simple_commands.write().await;
+    let Some(_) = map.remove(name) else {
+        ephemeral_message(ctx, "The command does not exist.").await?;
+        return Ok(());
+    };
+
+    Ok(())
+}
+
+async fn register_command(ctx: Context<'_>, name: String) -> Result<()> {
+    let guild = ctx
+        .guild()
+        .expect("Expected /commands add to be guild only.");
+    guild
+        .create_application_command(ctx, |c| c.name(name).description("A simple text command"))
+        .await?;
+
+    Ok(())
+}
+async fn unregister_command(ctx: Context<'_>, name: &str) -> Result<()> {
     let guild = ctx
         .guild()
         .expect("Expected /commands remove should be guild only.");
@@ -110,7 +121,28 @@ pub async fn remove(
         .delete_application_command(ctx, command_to_delete.id)
         .await?;
 
-    ephemeral_message(ctx, "The command has been removed.").await?;
+    Ok(())
+}
+
+async fn ensure_not_default_command(ctx: Context<'_>, name: &str) -> Result<()> {
+    if DEFAULT_COMMANDS
+        .get()
+        .expect("Expected default commands to be initialized.")
+        .iter()
+        .any(|n| n == name)
+    {
+        let msg =
+            "Cannot add command with that name because it's already taken by a default command.";
+        ephemeral_message(ctx, msg).await?;
+    }
+
+    Ok(())
+}
+
+async fn ensure_single_word(ctx: Context<'_>, name: &str) -> Result<()> {
+    if !name.chars().all(|c| c.is_ascii_alphanumeric()) {
+        ephemeral_message(ctx, "Command name must be a single word.").await?;
+    };
 
     Ok(())
 }
