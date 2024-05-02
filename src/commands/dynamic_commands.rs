@@ -1,6 +1,6 @@
 use std::collections::hash_map::Entry;
 
-use crate::{common::ephemeral_message, Context, Result};
+use crate::{common::ephemeral_message, Context, Result, DEFAULT_COMMANDS};
 
 pub type SimpleCommands = std::collections::HashMap<String, String>;
 
@@ -21,6 +21,20 @@ pub async fn add(
     #[description = "The name of the command"] name: String,
     #[description = "What the command should say"] text: String,
 ) -> Result<()> {
+    if DEFAULT_COMMANDS
+        .get()
+        .expect("Expected default commands to be initialized.")
+        .iter()
+        .any(|n| n == &name)
+    {
+        ephemeral_message(
+            ctx,
+            "Cannot add command with that name because it's already taken by a default command.",
+        )
+        .await?;
+        return Ok(());
+    }
+
     let mut map = ctx.data().simple_commands.write().await;
     let Entry::Vacant(entry) = map.entry(name.clone()) else {
         ephemeral_message(ctx, "The command already exists.").await?;

@@ -2,7 +2,7 @@ mod commands;
 mod common;
 
 use std::num::NonZeroUsize;
-use std::sync::atomic::AtomicI64;
+use std::sync::{atomic::AtomicI64, OnceLock};
 
 use anyhow::Result;
 use commands::*;
@@ -22,6 +22,7 @@ pub type Context<'a> = poise::Context<'a, Data, anyhow::Error>;
 pub type Error = anyhow::Error;
 
 pub const SUB_ROLE_ID: u64 = 930791790490030100;
+pub static DEFAULT_COMMANDS: OnceLock<Vec<String>> = OnceLock::new();
 
 #[tokio::main]
 async fn main() {
@@ -35,29 +36,33 @@ async fn main() {
         .await
         .expect("Expected to be able to connect to the database");
 
+    let commands = vec![
+        rpg(),
+        eightball(),
+        duel(),
+        duelstats(),
+        dino(),
+        color(),
+        uncolor(),
+        sudoku(),
+        quote(),
+        mixu(),
+        bestmixu(),
+        mikustare(),
+        rps(),
+        ask(),
+        commands(),
+    ];
+
+    DEFAULT_COMMANDS.get_or_init(|| commands.iter().map(|c| c.name.clone()).collect::<Vec<_>>());
+
     let best_mixu = initialize_best_mixu_score(&database)
         .await
         .expect("Unable to get best mixu score")
         .unwrap_or_default();
 
     let options = poise::FrameworkOptions {
-        commands: vec![
-            rpg(),
-            eightball(),
-            duel(),
-            duelstats(),
-            dino(),
-            color(),
-            uncolor(),
-            sudoku(),
-            quote(),
-            mixu(),
-            bestmixu(),
-            mikustare(),
-            rps(),
-            ask(),
-            commands(),
-        ],
+        commands,
         prefix_options: poise::PrefixFrameworkOptions {
             prefix: Some(String::from(">")),
             mention_as_prefix: false,
