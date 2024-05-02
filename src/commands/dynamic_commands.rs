@@ -21,6 +21,11 @@ pub async fn add(
     #[description = "The name of the command"] name: String,
     #[description = "What the command should say"] text: String,
 ) -> Result<()> {
+    if !name.chars().all(|c| c.is_ascii_alphanumeric()) {
+        ephemeral_message(ctx, "Command name must be a single word.").await?;
+        return Ok(());
+    };
+
     if DEFAULT_COMMANDS
         .get()
         .expect("Expected default commands to be initialized.")
