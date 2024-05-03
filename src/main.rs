@@ -206,7 +206,7 @@ async fn register_guild_commands(
         // HACK: I could not find a way create commands by name
         let commands = names
             .iter()
-            .map(|n| json!({"name": n, "description": "A simple command"}))
+            .map(|(name, _content)| json!({"name": name, "description": "A simple command"}))
             .collect::<Vec<_>>();
         let commands = CreateApplicationCommands(commands);
 
