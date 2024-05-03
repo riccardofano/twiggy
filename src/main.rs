@@ -127,8 +127,12 @@ async fn event_event_handler(
         poise::Event::Ready { data_about_bot } => {
             println!("{} is connected!", data_about_bot.user.name);
 
-            let commands_map = fetch_guild_commands(user_data).await?;
-            register_guild_commands(ctx, &commands_map).await?;
+            let commands_map = fetch_guild_commands(user_data)
+                .await
+                .expect("Could not fetch simple guild commands");
+            register_guild_commands(ctx, &commands_map)
+                .await
+                .expect("Could not register simple guild commands");
             let mut data_commands = user_data.simple_commands.write().await;
             *data_commands = commands_map;
 
