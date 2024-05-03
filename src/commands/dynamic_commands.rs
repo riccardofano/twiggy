@@ -58,36 +58,61 @@ pub async fn remove(
 }
 
 async fn insert_command(ctx: Context<'_>, name: &str, content: &str) -> Result<()> {
-    let mut map = ctx.data().simple_commands.write().await;
+    let data = ctx.data();
+    let mut map = data.simple_commands.write().await;
     let Entry::Vacant(entry) = map.entry(name.to_owned()) else {
         // TODO: Should this be outside?
         ephemeral_message(ctx, "The command already exists.").await?;
         return Ok(());
     };
 
-    entry.insert(content.to_owned());
+    sqlx::query!(
+        "INSERT INTO SimpleCommands (name, content) VALUES (?, ?)",
+        name,
+        content
+    )
+    .execute(&data.database)
+    .await?;
 
-    // TODO: save to db
+    entry.insert(content.to_owned());
 
     Ok(())
 }
 async fn update_command(ctx: Context<'_>, name: &str, content: &str) -> Result<()> {
-    let mut map = ctx.data().simple_commands.write().await;
+    let data = ctx.data();
+    let mut map = data.simple_commands.write().await;
 
     let Some(entry) = map.get_mut(name) else {
         ephemeral_message(ctx, "The command does not exist.").await?;
         return Ok(());
     };
+
+    sqlx::query!(
+        "UPDATE SimpleCommands SET content = ? WHERE name = ?",
+        content,
+        name
+    )
+    .execute(&data.database)
+    .await?;
+
     *entry = content.to_owned();
 
     Ok(())
 }
 async fn delete_command(ctx: Context<'_>, name: &str) -> Result<()> {
-    let mut map = ctx.data().simple_commands.write().await;
-    let Some(_) = map.remove(name) else {
-        ephemeral_message(ctx, "The command does not exist.").await?;
+    let data = ctx.data();
+    let mut map = data.simple_commands.write().await;
+
+    let Entry::Occupied(entry) = map.entry(name.to_owned()) else {
+        ephemeral_message(ctx, "This command name does not exist.").await?;
         return Ok(());
     };
+
+    sqlx::query!("DELETE FROM SimpleCommands WHERE name = ?", name)
+        .execute(&data.database)
+        .await?;
+
+    entry.remove_entry();
 
     Ok(())
 }
@@ -138,7 +163,6 @@ async fn ensure_not_default_command(ctx: Context<'_>, name: &str) -> Result<()> 
 
     Ok(())
 }
-
 async fn ensure_single_word(ctx: Context<'_>, name: &str) -> Result<()> {
     if !name.chars().all(|c| c.is_ascii_alphanumeric()) {
         ephemeral_message(ctx, "Command name must be a single word.").await?;
