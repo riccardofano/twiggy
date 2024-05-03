@@ -58,6 +58,15 @@ async fn main() {
     ];
 
     DEFAULT_COMMANDS.get_or_init(|| commands.iter().map(|c| c.name.clone()).collect::<Vec<_>>());
+    // TODO: Commands should be guild independent
+    let simple_commands = sqlx::query!("SELECT name, content FROM SimpleCommands")
+        .fetch_all(&database)
+        .await
+        .expect("Expected to be able to fetch simple commands");
+    let simple_commands = simple_commands
+        .into_iter()
+        .map(|r| (r.name, r.content))
+        .collect::<SimpleCommands>();
 
     let best_mixu = initialize_best_mixu_score(&database)
         .await
@@ -95,7 +104,7 @@ async fn main() {
                     database,
                     rpg_summary_cache: Mutex::new(LruCache::new(NonZeroUsize::new(10).unwrap())),
                     quote_data: RwLock::default(),
-                    simple_commands: RwLock::default(),
+                    simple_commands: RwLock::new(simple_commands),
                     best_mixu,
                 })
             })
