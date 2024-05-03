@@ -135,6 +135,8 @@ async fn event_event_handler(
                 .expect("Could not register simple guild commands");
             let mut data_commands = user_data.simple_commands.write().await;
             *data_commands = commands_map;
+            // NOTE: Drop here because tokio::select! keeps the lock otherwise
+            drop(data_commands);
 
             tokio::select! {
                 _ = setup_rpg_summary(ctx, user_data) => {}
