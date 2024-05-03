@@ -84,7 +84,8 @@ async fn insert_command(
     let data = ctx.data();
     let mut map = data.simple_commands.write().await;
 
-    let guild_commands = map.entry(guild_id.0 as i64).or_default();
+    let guild_id = guild_id.0 as i64;
+    let guild_commands = map.entry(guild_id).or_default();
     let Entry::Vacant(entry) = guild_commands.entry(name.to_owned()) else {
         // TODO: Should this be outside?
         ephemeral_message(ctx, "The command already exists.").await?;
@@ -92,7 +93,8 @@ async fn insert_command(
     };
 
     sqlx::query!(
-        "INSERT INTO SimpleCommands (name, content) VALUES (?, ?)",
+        "INSERT INTO SimpleCommands (guild_id, name, content) VALUES (?, ?, ?)",
+        guild_id,
         name,
         content
     )
@@ -112,7 +114,8 @@ async fn update_command(
     let data = ctx.data();
     let mut map = data.simple_commands.write().await;
 
-    let Some(guild_commands) = map.get_mut(&(guild_id.0 as i64)) else {
+    let guild_id = guild_id.0 as i64;
+    let Some(guild_commands) = map.get_mut(&guild_id) else {
         ephemeral_message(ctx, "The command does not exist.").await?;
         return Ok(());
     };
@@ -122,7 +125,8 @@ async fn update_command(
     };
 
     sqlx::query!(
-        "UPDATE SimpleCommands SET content = ? WHERE name = ?",
+        "UPDATE OR IGNORE SimpleCommands SET content = ? WHERE guild_id = ? AND name = ?",
+        guild_id,
         content,
         name
     )
@@ -137,7 +141,8 @@ async fn delete_command(ctx: Context<'_>, guild_id: &GuildId, name: &str) -> Res
     let data = ctx.data();
     let mut map = data.simple_commands.write().await;
 
-    let Some(guild_commands) = map.get_mut(&(guild_id.0 as i64)) else {
+    let guild_id = guild_id.0 as i64;
+    let Some(guild_commands) = map.get_mut(&guild_id) else {
         ephemeral_message(ctx, "This command name does not exist.").await?;
         return Ok(());
     };
@@ -146,9 +151,13 @@ async fn delete_command(ctx: Context<'_>, guild_id: &GuildId, name: &str) -> Res
         return Ok(());
     };
 
-    sqlx::query!("DELETE FROM SimpleCommands WHERE name = ?", name)
-        .execute(&data.database)
-        .await?;
+    sqlx::query!(
+        "DELETE FROM SimpleCommands WHERE guild_id = ? AND name = ?",
+        guild_id,
+        name
+    )
+    .execute(&data.database)
+    .await?;
 
     entry.remove_entry();
 
