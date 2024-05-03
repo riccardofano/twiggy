@@ -21,6 +21,8 @@ pub async fn add(
     #[description = "The name of the command"] name: String,
     #[description = "What the command should say"] content: String,
 ) -> Result<()> {
+    let name = name.to_lowercase();
+
     ensure_single_word(ctx, &name).await?;
     ensure_not_default_command(ctx, &name).await?;
 
@@ -38,6 +40,7 @@ pub async fn edit(
     #[description = "The name of the command"] name: String,
     #[description = "What the command should say"] content: String,
 ) -> Result<()> {
+    let name = name.to_lowercase();
     update_command(ctx, &name, &content).await?;
     ephemeral_message(ctx, "The command has been updated.").await?;
 
@@ -49,6 +52,8 @@ pub async fn remove(
     ctx: Context<'_>,
     #[description = "The name of the command"] name: String,
 ) -> Result<()> {
+    let name = name.to_lowercase();
+
     delete_command(ctx, &name).await?;
     unregister_command(ctx, &name).await?;
 
