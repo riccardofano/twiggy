@@ -1,14 +1,17 @@
 mod commands;
 mod common;
 
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::{atomic::AtomicI64, OnceLock};
 
+use ::serenity::builder::CreateApplicationCommands;
 use anyhow::Result;
 use commands::*;
 use lru::LruCache;
 use poise::serenity_prelude as serenity;
 use poise::serenity_prelude::Mutex;
+use serde_json::json;
 use tokio::sync::RwLock;
 
 pub struct Data {
@@ -114,6 +117,12 @@ async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
     }
 }
 
+#[derive(Debug)]
+struct GuildCommands {
+    guild_id: i64,
+    commands: String,
+}
+
 async fn event_event_handler(
     ctx: &serenity::Context,
     event: &poise::Event<'_>,
@@ -124,11 +133,38 @@ async fn event_event_handler(
         poise::Event::Ready { data_about_bot } => {
             println!("{} is connected!", data_about_bot.user.name);
 
-            // Remove commands that don't belong to this bot.
-            for guild_id in ctx.cache.guilds() {
-                guild_id
-                    .set_application_commands(&ctx.http, |commands| commands)
-                    .await?;
+            // NOTE: Unchecked because SQLX thinks name can be NULL for some reason.
+            let guild_commands = sqlx::query_as_unchecked!(
+                GuildCommands,
+                "SELECT guild_id, GROUP_CONCAT(name) commands FROM SimpleCommands GROUP BY guild_id"
+            )
+            .fetch_all(&user_data.database)
+            .await?;
+            let commands_map = guild_commands
+                .iter()
+                .map(|r| (r.guild_id, r.commands.split(',').collect::<Vec<_>>()))
+                .collect::<HashMap<i64, Vec<&str>>>();
+
+            for id in ctx.cache.guilds() {
+                let Some(names) = commands_map.get(&(id.0 as i64)) else {
+                    // Reset commands if there aren't any for this guild
+                    id.set_application_commands(&ctx.http, |commands| commands)
+                        .await?;
+                    continue;
+                };
+
+                // HACK: I could not find a way create commands by name
+                let commands = names
+                    .iter()
+                    .map(|n| json!({"name": n, "description": "A simple command"}))
+                    .collect::<Vec<_>>();
+                let commands = CreateApplicationCommands(commands);
+
+                id.set_application_commands(ctx, |c| {
+                    *c = commands;
+                    c
+                })
+                .await?;
             }
 
             tokio::select! {
