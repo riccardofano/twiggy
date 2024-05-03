@@ -1,8 +1,10 @@
-use std::collections::hash_map::Entry;
+use std::collections::{hash_map::Entry, HashMap};
+
+use poise::serenity_prelude::GuildId;
 
 use crate::{common::ephemeral_message, Context, Result, DEFAULT_COMMANDS};
 
-pub type SimpleCommands = std::collections::HashMap<String, String>;
+pub type SimpleCommands = HashMap<i64, HashMap<String, String>>;
 
 #[poise::command(
     guild_only,
@@ -26,8 +28,12 @@ pub async fn add(
     ensure_single_word(ctx, &name).await?;
     ensure_not_default_command(ctx, &name).await?;
 
-    insert_command(ctx, &name, &content).await?;
-    register_command(ctx, name).await?;
+    let guild = ctx
+        .guild()
+        .expect("Expected /commands add to be guild only.");
+
+    insert_command(ctx, &guild.id, &name, &content).await?;
+    register_command(ctx, &guild.id, name).await?;
 
     ephemeral_message(ctx, "Command added").await?;
 
@@ -41,7 +47,11 @@ pub async fn edit(
     #[description = "What the command should say"] content: String,
 ) -> Result<()> {
     let name = name.to_lowercase();
-    update_command(ctx, &name, &content).await?;
+    let guild = ctx
+        .guild()
+        .expect("Expected /commands edit to be guild only.");
+
+    update_command(ctx, &guild.id, &name, &content).await?;
     ephemeral_message(ctx, "The command has been updated.").await?;
 
     Ok(())
@@ -53,19 +63,29 @@ pub async fn remove(
     #[description = "The name of the command"] name: String,
 ) -> Result<()> {
     let name = name.to_lowercase();
+    let guild = ctx
+        .guild()
+        .expect("Expected /commands edit to be guild only.");
 
-    delete_command(ctx, &name).await?;
-    unregister_command(ctx, &name).await?;
+    delete_command(ctx, &guild.id, &name).await?;
+    unregister_command(ctx, &guild.id, &name).await?;
 
     ephemeral_message(ctx, "The command has been removed.").await?;
 
     Ok(())
 }
 
-async fn insert_command(ctx: Context<'_>, name: &str, content: &str) -> Result<()> {
+async fn insert_command(
+    ctx: Context<'_>,
+    guild_id: &GuildId,
+    name: &str,
+    content: &str,
+) -> Result<()> {
     let data = ctx.data();
     let mut map = data.simple_commands.write().await;
-    let Entry::Vacant(entry) = map.entry(name.to_owned()) else {
+
+    let guild_commands = map.entry(guild_id.0 as i64).or_default();
+    let Entry::Vacant(entry) = guild_commands.entry(name.to_owned()) else {
         // TODO: Should this be outside?
         ephemeral_message(ctx, "The command already exists.").await?;
         return Ok(());
@@ -83,11 +103,20 @@ async fn insert_command(ctx: Context<'_>, name: &str, content: &str) -> Result<(
 
     Ok(())
 }
-async fn update_command(ctx: Context<'_>, name: &str, content: &str) -> Result<()> {
+async fn update_command(
+    ctx: Context<'_>,
+    guild_id: &GuildId,
+    name: &str,
+    content: &str,
+) -> Result<()> {
     let data = ctx.data();
     let mut map = data.simple_commands.write().await;
 
-    let Some(entry) = map.get_mut(name) else {
+    let Some(guild_commands) = map.get_mut(&(guild_id.0 as i64)) else {
+        ephemeral_message(ctx, "The command does not exist.").await?;
+        return Ok(());
+    };
+    let Some(entry) = guild_commands.get_mut(name) else {
         ephemeral_message(ctx, "The command does not exist.").await?;
         return Ok(());
     };
@@ -104,11 +133,15 @@ async fn update_command(ctx: Context<'_>, name: &str, content: &str) -> Result<(
 
     Ok(())
 }
-async fn delete_command(ctx: Context<'_>, name: &str) -> Result<()> {
+async fn delete_command(ctx: Context<'_>, guild_id: &GuildId, name: &str) -> Result<()> {
     let data = ctx.data();
     let mut map = data.simple_commands.write().await;
 
-    let Entry::Occupied(entry) = map.entry(name.to_owned()) else {
+    let Some(guild_commands) = map.get_mut(&(guild_id.0 as i64)) else {
+        ephemeral_message(ctx, "This command name does not exist.").await?;
+        return Ok(());
+    };
+    let Entry::Occupied(entry) = guild_commands.entry(name.to_owned()) else {
         ephemeral_message(ctx, "This command name does not exist.").await?;
         return Ok(());
     };
@@ -122,22 +155,15 @@ async fn delete_command(ctx: Context<'_>, name: &str) -> Result<()> {
     Ok(())
 }
 
-async fn register_command(ctx: Context<'_>, name: String) -> Result<()> {
-    let guild = ctx
-        .guild()
-        .expect("Expected /commands add to be guild only.");
-    guild
+async fn register_command(ctx: Context<'_>, guild_id: &GuildId, name: String) -> Result<()> {
+    guild_id
         .create_application_command(ctx, |c| c.name(name).description("A simple text command"))
         .await?;
 
     Ok(())
 }
-async fn unregister_command(ctx: Context<'_>, name: &str) -> Result<()> {
-    let guild = ctx
-        .guild()
-        .expect("Expected /commands remove should be guild only.");
-
-    let Some(command_to_delete) = guild
+async fn unregister_command(ctx: Context<'_>, guild_id: &GuildId, name: &str) -> Result<()> {
+    let Some(command_to_delete) = guild_id
         .get_application_commands(ctx)
         .await?
         .into_iter()
@@ -147,7 +173,7 @@ async fn unregister_command(ctx: Context<'_>, name: &str) -> Result<()> {
         return Ok(());
     };
 
-    guild
+    guild_id
         .delete_application_command(ctx, command_to_delete.id)
         .await?;
 

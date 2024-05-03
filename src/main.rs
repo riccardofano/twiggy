@@ -58,15 +58,6 @@ async fn main() {
     ];
 
     DEFAULT_COMMANDS.get_or_init(|| commands.iter().map(|c| c.name.clone()).collect::<Vec<_>>());
-    // TODO: Commands should be guild independent
-    let simple_commands = sqlx::query!("SELECT name, content FROM SimpleCommands")
-        .fetch_all(&database)
-        .await
-        .expect("Expected to be able to fetch simple commands");
-    let simple_commands = simple_commands
-        .into_iter()
-        .map(|r| (r.name, r.content))
-        .collect::<SimpleCommands>();
 
     let best_mixu = initialize_best_mixu_score(&database)
         .await
@@ -104,7 +95,7 @@ async fn main() {
                     database,
                     rpg_summary_cache: Mutex::new(LruCache::new(NonZeroUsize::new(10).unwrap())),
                     quote_data: RwLock::default(),
-                    simple_commands: RwLock::new(simple_commands),
+                    simple_commands: RwLock::default(),
                     best_mixu,
                 })
             })
@@ -126,12 +117,6 @@ async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
     }
 }
 
-#[derive(Debug)]
-struct GuildCommands {
-    guild_id: i64,
-    commands: String,
-}
-
 async fn event_event_handler(
     ctx: &serenity::Context,
     event: &poise::Event<'_>,
@@ -142,39 +127,10 @@ async fn event_event_handler(
         poise::Event::Ready { data_about_bot } => {
             println!("{} is connected!", data_about_bot.user.name);
 
-            // NOTE: Unchecked because SQLX thinks name can be NULL for some reason.
-            let guild_commands = sqlx::query_as_unchecked!(
-                GuildCommands,
-                "SELECT guild_id, GROUP_CONCAT(name) commands FROM SimpleCommands GROUP BY guild_id"
-            )
-            .fetch_all(&user_data.database)
-            .await?;
-            let commands_map = guild_commands
-                .iter()
-                .map(|r| (r.guild_id, r.commands.split(',').collect::<Vec<_>>()))
-                .collect::<HashMap<i64, Vec<&str>>>();
-
-            for id in ctx.cache.guilds() {
-                let Some(names) = commands_map.get(&(id.0 as i64)) else {
-                    // Reset commands if there aren't any for this guild
-                    id.set_application_commands(&ctx.http, |commands| commands)
-                        .await?;
-                    continue;
-                };
-
-                // HACK: I could not find a way create commands by name
-                let commands = names
-                    .iter()
-                    .map(|n| json!({"name": n, "description": "A simple command"}))
-                    .collect::<Vec<_>>();
-                let commands = CreateApplicationCommands(commands);
-
-                id.set_application_commands(ctx, |c| {
-                    *c = commands;
-                    c
-                })
-                .await?;
-            }
+            let commands_map = fetch_guild_commands(user_data).await?;
+            register_guild_commands(ctx, &commands_map).await?;
+            let mut data_commands = user_data.simple_commands.write().await;
+            *data_commands = commands_map;
 
             tokio::select! {
                 _ = setup_rpg_summary(ctx, user_data) => {}
@@ -183,10 +139,17 @@ async fn event_event_handler(
         }
         poise::Event::InteractionCreate { interaction } => {
             let interaction = interaction.clone();
-            let map = user_data.simple_commands.read().await;
             let command = interaction.application_command().unwrap();
 
-            if let Some(text) = map.get(&command.data.name) {
+            let map = user_data.simple_commands.read().await;
+            let Some(guild_id) = command.guild_id else {
+                return Ok(());
+            };
+            let Some(guild_commands) = map.get(&(guild_id.0 as i64)) else {
+                return Ok(());
+            };
+
+            if let Some(text) = guild_commands.get(&command.data.name) {
                 command
                     .create_interaction_response(ctx, |r| {
                         r.interaction_response_data(|d| d.content(text))
@@ -195,6 +158,59 @@ async fn event_event_handler(
             };
         }
         _ => {}
+    }
+
+    Ok(())
+}
+
+#[derive(Debug)]
+struct GuildCommand {
+    guild_id: i64,
+    name: String,
+    content: String,
+}
+
+async fn fetch_guild_commands(user_data: &Data) -> Result<HashMap<i64, HashMap<String, String>>> {
+    let guild_commands = sqlx::query_as!(
+        GuildCommand,
+        "SELECT guild_id, name, content FROM SimpleCommands"
+    )
+    .fetch_all(&user_data.database)
+    .await?;
+
+    let mut commands_map: HashMap<i64, HashMap<String, String>> = HashMap::new();
+    for command in guild_commands {
+        let entry = commands_map.entry(command.guild_id).or_default();
+        entry.insert(command.name, command.content);
+    }
+
+    Ok(commands_map)
+}
+
+async fn register_guild_commands(
+    ctx: &serenity::Context,
+    commands_map: &SimpleCommands,
+) -> Result<()> {
+    for id in ctx.cache.guilds() {
+        let Some(names) = commands_map.get(&(id.0 as i64)) else {
+            // Reset commands if there aren't any for this guild
+            id.set_application_commands(&ctx.http, |commands| commands)
+                .await?;
+            continue;
+        };
+
+        // HACK: I could not find a way create commands by name
+        let commands = names
+            .iter()
+            .map(|n| json!({"name": n, "description": "A simple command"}))
+            .collect::<Vec<_>>();
+        let commands = CreateApplicationCommands(commands);
+
+        id.set_application_commands(ctx, |c| {
+            *c = commands;
+            c
+        })
+        .await?;
     }
 
     Ok(())
