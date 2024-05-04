@@ -427,11 +427,9 @@ async fn gift(
         format!("[{}]({})", dino, dino_record.hatch_message)
     };
 
-    let embed = CreateEmbed::default()
-        .colour(0x990933)
-        .description(&format!(
-            "**{sender_name}** gifted {dino_name} to **{receiver_name}**! How kind!",
-        ));
+    let embed = CreateEmbed::default().colour(0x990933).description(format!(
+        "**{sender_name}** gifted {dino_name} to **{receiver_name}**! How kind!",
+    ));
 
     ctx.send(CreateReply::default().embed(embed)).await?;
 
