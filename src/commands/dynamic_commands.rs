@@ -2,7 +2,7 @@ use std::collections::{hash_map::Entry, HashMap};
 
 use poise::serenity_prelude::GuildId;
 
-use crate::{common::ephemeral_message, Context, Result, DEFAULT_COMMANDS};
+use crate::{common::ephemeral_reply, Context, Result, DEFAULT_COMMANDS};
 
 pub type SimpleCommands = HashMap<i64, HashMap<String, String>>;
 
@@ -35,7 +35,7 @@ pub async fn add(
     insert_command(ctx, &guild.id, &name, &content).await?;
     register_command(ctx, &guild.id, name).await?;
 
-    ephemeral_message(ctx, "Command added").await?;
+    ephemeral_reply(ctx, "Command added").await?;
 
     Ok(())
 }
@@ -52,7 +52,7 @@ pub async fn edit(
         .expect("Expected /commands edit to be guild only.");
 
     update_command(ctx, &guild.id, &name, &content).await?;
-    ephemeral_message(ctx, "The command has been updated.").await?;
+    ephemeral_reply(ctx, "The command has been updated.").await?;
 
     Ok(())
 }
@@ -70,7 +70,7 @@ pub async fn remove(
     delete_command(ctx, &guild.id, &name).await?;
     unregister_command(ctx, &guild.id, &name).await?;
 
-    ephemeral_message(ctx, "The command has been removed.").await?;
+    ephemeral_reply(ctx, "The command has been removed.").await?;
 
     Ok(())
 }
@@ -88,7 +88,7 @@ async fn insert_command(
     let guild_commands = map.entry(guild_id).or_default();
     let Entry::Vacant(entry) = guild_commands.entry(name.to_owned()) else {
         // TODO: Should this be outside?
-        ephemeral_message(ctx, "The command already exists.").await?;
+        ephemeral_reply(ctx, "The command already exists.").await?;
         return Ok(());
     };
 
@@ -116,11 +116,11 @@ async fn update_command(
 
     let guild_id = guild_id.get() as i64;
     let Some(guild_commands) = map.get_mut(&guild_id) else {
-        ephemeral_message(ctx, "The command does not exist.").await?;
+        ephemeral_reply(ctx, "The command does not exist.").await?;
         return Ok(());
     };
     let Some(entry) = guild_commands.get_mut(name) else {
-        ephemeral_message(ctx, "The command does not exist.").await?;
+        ephemeral_reply(ctx, "The command does not exist.").await?;
         return Ok(());
     };
 
@@ -143,11 +143,11 @@ async fn delete_command(ctx: Context<'_>, guild_id: &GuildId, name: &str) -> Res
 
     let guild_id = guild_id.get() as i64;
     let Some(guild_commands) = map.get_mut(&guild_id) else {
-        ephemeral_message(ctx, "This command name does not exist.").await?;
+        ephemeral_reply(ctx, "This command name does not exist.").await?;
         return Ok(());
     };
     let Entry::Occupied(entry) = guild_commands.entry(name.to_owned()) else {
-        ephemeral_message(ctx, "This command name does not exist.").await?;
+        ephemeral_reply(ctx, "This command name does not exist.").await?;
         return Ok(());
     };
 
@@ -198,14 +198,14 @@ async fn ensure_not_default_command(ctx: Context<'_>, name: &str) -> Result<()> 
     {
         let msg =
             "Cannot add command with that name because it's already taken by a default command.";
-        ephemeral_message(ctx, msg).await?;
+        ephemeral_reply(ctx, msg).await?;
     }
 
     Ok(())
 }
 async fn ensure_single_word(ctx: Context<'_>, name: &str) -> Result<()> {
     if !name.chars().all(|c| c.is_ascii_alphanumeric()) {
-        ephemeral_message(ctx, "Command name must be a single word.").await?;
+        ephemeral_reply(ctx, "Command name must be a single word.").await?;
     };
 
     Ok(())

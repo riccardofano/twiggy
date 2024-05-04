@@ -1,4 +1,4 @@
-use crate::{common::ephemeral_message, Context, Result};
+use crate::{common::ephemeral_reply, Context, Result};
 
 use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -24,7 +24,7 @@ pub async fn ask(
 
     let now = Utc::now().timestamp();
     if last_called.load(Ordering::Relaxed) + ASK_COOLDOWN > now {
-        ephemeral_message(ctx, "The ask command is on cooldown.").await?;
+        ephemeral_reply(ctx, "The ask command is on cooldown.").await?;
         return Ok(());
     }
 

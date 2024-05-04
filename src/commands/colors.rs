@@ -7,7 +7,7 @@ use poise::serenity_prelude::{Member, Mention, Mutex, Role};
 use rand::Rng;
 use sqlx::SqlitePool;
 
-use crate::{common::ephemeral_message, Context, Result, SUB_ROLE_ID};
+use crate::{common::ephemeral_reply, Context, Result, SUB_ROLE_ID};
 
 // These commands were originally made in american english so I'm keeping them
 // that way, there won't be any `ou`s in this module.
@@ -35,22 +35,22 @@ async fn change(
     #[description = "The 6 digit hex color to change to"] hexcode: String,
 ) -> Result<()> {
     if let Err(reason) = reject_on_cooldown(ctx).await {
-        ephemeral_message(ctx, reason.to_string()).await?;
+        ephemeral_reply(ctx, reason.to_string()).await?;
         return Ok(());
     }
 
     let Some(color) = to_color(&hexcode) else {
-        ephemeral_message(ctx, "Please provide a valid hex color code.").await?;
+        ephemeral_reply(ctx, "Please provide a valid hex color code.").await?;
         return Ok(());
     };
 
     let Some(member) = ctx.author_member().await else {
-        ephemeral_message(ctx, "I could not find your roles.").await?;
+        ephemeral_reply(ctx, "I could not find your roles.").await?;
         return Ok(());
     };
 
     if let Err(reason) = reject_non_subs(&member).await {
-        ephemeral_message(ctx, reason.to_string()).await?;
+        ephemeral_reply(ctx, reason.to_string()).await?;
         return Ok(());
     }
 
@@ -58,7 +58,7 @@ async fn change(
         Ok(name) => name,
         Err(e) => {
             eprintln!("Error while trying to change color: {e}");
-            ephemeral_message(
+            ephemeral_reply(
                 ctx,
                 "Something went wrong while trying to change your color. :(",
             )
@@ -67,7 +67,7 @@ async fn change(
         }
     };
 
-    ephemeral_message(ctx, format!("The role color {role_name} has been added!")).await?;
+    ephemeral_reply(ctx, format!("The role color {role_name} has been added!")).await?;
 
     Ok(())
 }
@@ -76,24 +76,24 @@ async fn change(
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn random(ctx: Context<'_>) -> Result<()> {
     if let Err(reason) = reject_on_cooldown(ctx).await {
-        ephemeral_message(ctx, reason.to_string()).await?;
+        ephemeral_reply(ctx, reason.to_string()).await?;
         return Ok(());
     }
 
     let Some(member) = ctx.author_member().await else {
-        ephemeral_message(ctx, "I could not find your roles.").await?;
+        ephemeral_reply(ctx, "I could not find your roles.").await?;
         return Ok(());
     };
 
     if let Err(reason) = reject_non_subs(&member).await {
-        ephemeral_message(ctx, reason.to_string()).await?;
+        ephemeral_reply(ctx, reason.to_string()).await?;
         return Ok(());
     }
 
     let role_result = change_color(ctx, member, None).await;
     if let Err(e) = role_result {
         eprintln!("Error while trying to change to a random color: {e}");
-        ephemeral_message(
+        ephemeral_reply(
             ctx,
             "Something went wrong while trying to change your color. You're spared for now. :(",
         )
@@ -115,17 +115,17 @@ async fn random(ctx: Context<'_>) -> Result<()> {
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn gamble(ctx: Context<'_>) -> Result<()> {
     if let Err(reason) = reject_on_cooldown(ctx).await {
-        ephemeral_message(ctx, reason.to_string()).await?;
+        ephemeral_reply(ctx, reason.to_string()).await?;
         return Ok(());
     }
 
     let Some(member) = ctx.author_member().await else {
-        ephemeral_message(ctx, "I could not find your roles").await?;
+        ephemeral_reply(ctx, "I could not find your roles").await?;
         return Ok(());
     };
 
     if let Err(reason) = reject_non_subs(&member).await {
-        ephemeral_message(ctx, reason.to_string()).await?;
+        ephemeral_reply(ctx, reason.to_string()).await?;
         return Ok(());
     }
 
@@ -139,14 +139,14 @@ async fn gamble(ctx: Context<'_>) -> Result<()> {
         rng.gen_range(0..=100)
     };
     if roll > *gamble_chance {
-        ephemeral_message(ctx, "Yay! You get to keep your color!").await?;
+        ephemeral_reply(ctx, "Yay! You get to keep your color!").await?;
         return Ok(());
     }
 
     let role_result = change_color(ctx, member, None).await;
     if let Err(e) = role_result {
         eprintln!("Error while trying to change to a random color: {e}");
-        ephemeral_message(
+        ephemeral_reply(
             ctx,
             "Something went wrong while trying to change your color. You're spared for now. :(",
         )
@@ -207,7 +207,7 @@ pub async fn favorite(
     #[description = "The 6 digit hex color to change to"] hexcode: String,
 ) -> Result<()> {
     let Some(color) = to_color(&hexcode) else {
-        ephemeral_message(ctx, "Please provide a valid hex color code.").await?;
+        ephemeral_reply(ctx, "Please provide a valid hex color code.").await?;
         return Ok(());
     };
     let color_code = format!("#{color:06X}");
@@ -223,7 +223,7 @@ pub async fn favorite(
     .execute(&ctx.data().database)
     .await?;
 
-    ephemeral_message(
+    ephemeral_reply(
         ctx,
         format!("{color_code} has been set as your favorite color!"),
     )
@@ -236,17 +236,17 @@ pub async fn favorite(
 #[poise::command(guild_only, slash_command, prefix_command)]
 pub async fn lazy(ctx: Context<'_>) -> Result<()> {
     if let Err(reason) = reject_on_cooldown(ctx).await {
-        ephemeral_message(ctx, reason.to_string()).await?;
+        ephemeral_reply(ctx, reason.to_string()).await?;
         return Ok(());
     }
 
     let Some(member) = ctx.author_member().await else {
-        ephemeral_message(ctx, "Could not find your roles").await?;
+        ephemeral_reply(ctx, "Could not find your roles").await?;
         return Ok(());
     };
 
     if let Err(reason) = reject_non_subs(&member).await {
-        ephemeral_message(ctx, reason.to_string()).await?;
+        ephemeral_reply(ctx, reason.to_string()).await?;
         return Ok(());
     }
 
@@ -262,7 +262,7 @@ pub async fn lazy(ctx: Context<'_>) -> Result<()> {
     .await?;
 
     let Some(color_code) = row.fav_color else {
-        ephemeral_message(
+        ephemeral_reply(
             ctx,
             "You're so lazy you haven't even set a favorite color, \
             set one for next time!",
@@ -273,7 +273,7 @@ pub async fn lazy(ctx: Context<'_>) -> Result<()> {
     };
 
     let Some(author_member) = ctx.author_member().await else {
-        ephemeral_message(ctx, "Are you not in a guild right now?").await?;
+        ephemeral_reply(ctx, "Are you not in a guild right now?").await?;
         return Ok(());
     };
 
@@ -282,7 +282,7 @@ pub async fn lazy(ctx: Context<'_>) -> Result<()> {
             .execute(&ctx.data().database)
             .await?;
 
-        ephemeral_message(
+        ephemeral_reply(
             ctx,
             "For some reason the color that was saved was invalid, \
             I reset it for you, \
@@ -293,7 +293,7 @@ pub async fn lazy(ctx: Context<'_>) -> Result<()> {
     };
 
     let color_role = change_color(ctx, author_member, Some(color)).await?;
-    ephemeral_message(ctx, format!("Color has been changed to {color_role}")).await?;
+    ephemeral_reply(ctx, format!("Color has been changed to {color_role}")).await?;
 
     Ok(())
 }
@@ -313,10 +313,10 @@ pub async fn uncolor(
     let roles_were_removed = remove_unused_color_roles(ctx, &mut Cow::Owned(member)).await?;
 
     if !roles_were_removed {
-        ephemeral_message(ctx, "There were no roles to remove.").await?;
+        ephemeral_reply(ctx, "There were no roles to remove.").await?;
     }
 
-    ephemeral_message(
+    ephemeral_reply(
         ctx,
         format!(
             "All color roles have been removed from {}.",
@@ -340,7 +340,7 @@ async fn setgamblechance(
     #[description = "Gamble chance percentage"] percent: u8,
 ) -> Result<()> {
     if !(0..=100).contains(&percent) {
-        ephemeral_message(ctx, "Please provide a number between 0 and 100").await?;
+        ephemeral_reply(ctx, "Please provide a number between 0 and 100").await?;
         return Ok(());
     }
 
@@ -350,7 +350,7 @@ async fn setgamblechance(
         .expect("Expected to have passed the gamble chance as custom_data");
 
     *custom_data.lock().await = percent;
-    ephemeral_message(ctx, format!("Gamble chance has been set to {percent}%")).await?;
+    ephemeral_reply(ctx, format!("Gamble chance has been set to {percent}%")).await?;
 
     Ok(())
 }

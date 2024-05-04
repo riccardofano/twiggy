@@ -1,16 +1,14 @@
 use crate::Context;
 
 use poise::serenity_prelude::{
-    Colour, CreateEmbed, CreateInteractionResponse, CreateInteractionResponseMessage, Error,
-    InteractionResponseType, Member, MessageComponentInteraction, User,
+    Colour, CreateActionRow, CreateEmbed, CreateInteractionResponse,
+    CreateInteractionResponseMessage, Member, User,
 };
-use poise::ReplyHandle;
+use poise::CreateReply;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rand_seeder::Seeder;
-use serenity::builder::CreateActionRow;
 use std::borrow::Cow;
-use std::sync::Arc;
 
 pub fn response(message: CreateInteractionResponseMessage) -> CreateInteractionResponse {
     CreateInteractionResponse::Message(message)
@@ -31,48 +29,11 @@ pub fn embed_message(embed: CreateEmbed) -> CreateInteractionResponseMessage {
     CreateInteractionResponseMessage::new().embed(embed)
 }
 
-pub async fn ephemeral_message<S: AsRef<str>>(
-    ctx: Context<'_>,
-    content: S,
-) -> Result<ReplyHandle, Error> {
-    ctx.send(|message| message.content(content.as_ref()).ephemeral(true))
-        .await
+pub fn ephemeral_reply(content: impl Into<String>) -> CreateReply {
+    CreateReply::default().content(content).ephemeral(true)
 }
-
-pub async fn ephemeral_interaction_response<S: AsRef<str>>(
-    ctx: &Context<'_>,
-    interaction: Arc<MessageComponentInteraction>,
-    content: S,
-) -> Result<(), Error> {
-    interaction
-        .create_interaction_response(&ctx, |r| {
-            r.interaction_response_data(|d| d.content(content.as_ref()).ephemeral(true))
-        })
-        .await
-}
-
-pub async fn send_interaction_update(
-    ctx: Context<'_>,
-    interaction: &MessageComponentInteraction,
-    content: impl ToString,
-) -> anyhow::Result<()> {
-    interaction
-        .create_interaction_response(ctx, |r| {
-            r.kind(InteractionResponseType::UpdateMessage)
-                .interaction_response_data(|d| d.content(content).components(|c| c))
-        })
-        .await?;
-
-    Ok(())
-}
-
-pub async fn send_message_with_row(
-    ctx: Context<'_>,
-    content: impl Into<String>,
-    row: CreateActionRow,
-) -> Result<ReplyHandle, Error> {
-    ctx.send(|r| r.content(content).components(|c| c.add_action_row(row)))
-        .await
+pub fn reply_with_buttons(content: impl Into<String>, rows: Vec<CreateActionRow>) -> CreateReply {
+    CreateReply::default().content(content).components(rows)
 }
 
 pub async fn nickname(ctx: &Context<'_>, person: &User) -> Option<String> {
