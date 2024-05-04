@@ -68,7 +68,7 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
     };
 
     let challenger_character = Character::new(
-        challenger.id.0,
+        challenger.id.get(),
         challenger_name,
         &challenger_nick.as_deref(),
     );
@@ -125,7 +125,7 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         }
 
         let accepter_character =
-            Character::new(accepter.id.0, accepter_name, &accepter_nick.as_deref());
+            Character::new(accepter.id.get(), accepter_name, &accepter_nick.as_deref());
 
         let mut fight = RPGFight::new(challenger_character, accepter_character);
         let fight_result = fight.fight();
@@ -137,7 +137,7 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
 
         let new_challenger_elo = update_character_stats(
             &mut transaction,
-            challenger.id.0,
+            challenger.id.get(),
             challenger_stats.elo_rank,
             accepter_stats.elo_rank,
             fight_result.to_score(true),
@@ -146,7 +146,7 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
 
         let new_accepter_elo = update_character_stats(
             &mut transaction,
-            accepter.id.0,
+            accepter.id.get(),
             accepter_stats.elo_rank,
             challenger_stats.elo_rank,
             fight_result.to_score(false),
@@ -162,7 +162,7 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         .await?;
 
         transaction.commit().await?;
-        update_summary_cache(ctx, reply_msg.id.0, &fight_log).await;
+        update_summary_cache(ctx, reply_msg.id.get(), &fight_log).await;
 
         let elo_change_summary = format!(
             "**{challenger_name}**{} [{new_challenger_elo}]. \
@@ -230,7 +230,7 @@ fn assert_no_recent_loss(stats: &CharacterPastStats, name: &str) -> Result<()> {
 
 async fn retrieve_user_stats(ctx: Context<'_>, user: &User) -> Result<CharacterPastStats> {
     let mut conn = ctx.data().database.acquire().await?;
-    get_character_stats(&mut conn, user.id.0).await
+    get_character_stats(&mut conn, user.id.get()).await
 }
 
 async fn update_summary_cache(ctx: Context<'_>, message_id: u64, log: &str) {
@@ -278,7 +278,7 @@ async fn preview(
     }
 
     let silent = silent.unwrap_or(true);
-    let character = Character::new(ctx.author().id.0, &name, &Some(&name));
+    let character = Character::new(ctx.author().id.get(), &name, &Some(&name));
     ctx.send(|r| r.embed(|e| character.to_embed(e)).ephemeral(silent))
         .await?;
 
@@ -297,7 +297,7 @@ async fn character(
 
     let nick = nickname(&ctx, user).await;
     let name = nick.as_deref().unwrap_or(&user.name);
-    let character = Character::new(user.id.0, name, &nick.as_deref());
+    let character = Character::new(user.id.get(), name, &nick.as_deref());
 
     ctx.send(|r| r.embed(|e| character.to_embed(e)).ephemeral(silent))
         .await?;

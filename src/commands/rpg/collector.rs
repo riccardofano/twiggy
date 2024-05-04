@@ -31,7 +31,7 @@ pub async fn setup_rpg_summary(ctx: &serenity::Context, user_data: &Data) -> Res
                     .await;
 
                     if let Some(log) = retrieved.ok().flatten() {
-                        cache.put(message_id.0, log.clone());
+                        cache.put(message_id.get(), log.clone());
                         log
                     } else {
                         "This fight was lost to history or maybe it never happened".to_string()

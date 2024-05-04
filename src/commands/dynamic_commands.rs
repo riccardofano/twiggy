@@ -84,7 +84,7 @@ async fn insert_command(
     let data = ctx.data();
     let mut map = data.simple_commands.write().await;
 
-    let guild_id = guild_id.0 as i64;
+    let guild_id = guild_id.get() as i64;
     let guild_commands = map.entry(guild_id).or_default();
     let Entry::Vacant(entry) = guild_commands.entry(name.to_owned()) else {
         // TODO: Should this be outside?
@@ -114,7 +114,7 @@ async fn update_command(
     let data = ctx.data();
     let mut map = data.simple_commands.write().await;
 
-    let guild_id = guild_id.0 as i64;
+    let guild_id = guild_id.get() as i64;
     let Some(guild_commands) = map.get_mut(&guild_id) else {
         ephemeral_message(ctx, "The command does not exist.").await?;
         return Ok(());
@@ -141,7 +141,7 @@ async fn delete_command(ctx: Context<'_>, guild_id: &GuildId, name: &str) -> Res
     let data = ctx.data();
     let mut map = data.simple_commands.write().await;
 
-    let guild_id = guild_id.0 as i64;
+    let guild_id = guild_id.get() as i64;
     let Some(guild_commands) = map.get_mut(&guild_id) else {
         ephemeral_message(ctx, "This command name does not exist.").await?;
         return Ok(());

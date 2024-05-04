@@ -151,7 +151,7 @@ async fn event_event_handler(
             let Some(guild_id) = command.guild_id else {
                 return Ok(());
             };
-            let Some(guild_commands) = map.get(&(guild_id.0 as i64)) else {
+            let Some(guild_commands) = map.get(&(guild_id.get() as i64)) else {
                 return Ok(());
             };
 
@@ -198,7 +198,7 @@ async fn register_guild_commands(
     commands_map: &SimpleCommands,
 ) -> Result<()> {
     for id in ctx.cache.guilds() {
-        let Some(names) = commands_map.get(&(id.0 as i64)) else {
+        let Some(names) = commands_map.get(&(id.get() as i64)) else {
             // Reset commands if there aren't any for this guild
             id.set_application_commands(&ctx.http, |commands| commands)
                 .await?;

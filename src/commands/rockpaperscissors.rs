@@ -66,7 +66,7 @@ pub async fn rps(ctx: Context<'_>) -> Result<()> {
     let first_message = send_message_with_row(ctx, initial_msg, create_accept_button()).await?;
     let message_id = first_message.message().await?.id;
 
-    let Some(interaction) = find_opponent(ctx, message_id.0, challenger.id.0).await else {
+    let Some(interaction) = find_opponent(ctx, message_id.get(), challenger.id.get()).await else {
         let timeout_message = format!("Nobody was brave enough to challenge {challenger}");
         first_message
             .edit(ctx, |m| m.content(timeout_message).components(|c| c))
@@ -100,8 +100,8 @@ pub async fn rps(ctx: Context<'_>) -> Result<()> {
     )?;
 
     let (Some(challenger_choice), Some(accepter_choice)) = tokio::try_join!(
-        get_user_weapon_choice(ctx, challenger_msg.id.0, challenger.id.0),
-        get_user_weapon_choice(ctx, accepter_msg.id.0, accepter.id.0)
+        get_user_weapon_choice(ctx, challenger_msg.id.get(), challenger.id.get()),
+        get_user_weapon_choice(ctx, accepter_msg.id.get(), accepter.id.get())
     )?
     else {
         let msg = "Someone didn't pick their weapon in time :(";
@@ -161,7 +161,7 @@ async fn get_user_weapon_choice(
         .timeout(CHOICE_TIMEOUT)
         .collect_limit(1)
         .filter(move |f| {
-            f.user.id.0 == author_id
+            f.user.id.get() == author_id
                 && [ROCK_BTN, PAPER_BTN, SCISSORS_BTN].contains(&f.data.custom_id.as_str())
         })
         .await;

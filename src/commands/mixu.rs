@@ -162,7 +162,7 @@ async fn update_max_score(ctx: Context<'_>, score: i64, tiles: &[usize]) -> Resu
         .collect::<Vec<_>>()
         .join(",");
 
-    let user_id = ctx.author().id.0 as i64;
+    let user_id = ctx.author().id.get() as i64;
     sqlx::query!(
         "INSERT INTO BestMixu (user_id, score, tiles) VALUES (?, ?, ?)",
         user_id,
