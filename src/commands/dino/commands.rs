@@ -1,17 +1,21 @@
 use anyhow::bail;
 use chrono::{NaiveDateTime, Utc};
 use image::{imageops::overlay, io::Reader, ImageBuffer, ImageOutputFormat, RgbaImage};
-use poise::serenity_prelude::{AttachmentType, ButtonStyle, CreateActionRow, User, UserId};
+use poise::serenity_prelude::{
+    ButtonStyle, CreateActionRow, CreateAttachment, CreateButton, CreateEmbed, CreateEmbedAuthor,
+    CreateEmbedFooter, User, UserId,
+};
+use poise::CreateReply;
 use rand::{seq::SliceRandom, thread_rng};
 use sqlx::error::DatabaseError;
 use sqlx::sqlite::SqliteError;
 use sqlx::{FromRow, QueryBuilder, Row, Sqlite, SqliteExecutor, SqlitePool};
-use std::borrow::Cow;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use tokio::sync::{RwLock, RwLockReadGuard};
 
+use crate::common::{embed_message, ephemeral_text_message, response};
 use crate::{
     common::{avatar_url, ephemeral_message, name as get_name, pick_best_x_dice_rolls},
     Context, Result, SUB_ROLE_ID,
@@ -261,29 +265,24 @@ async fn collection(
     let author_name = get_name(&ctx, user).await;
     let filename = format!("{}_collection.png", user.name);
 
-    ctx.send(|message| {
-        message
-            .embed(|embed| {
-                embed
-                    .colour(0xffbf00)
-                    .author(|author| author.name(&author_name).icon_url(avatar_url(user)))
-                    .title(format!("{}'s collection", &author_name))
-                    .description(dino_collection.description())
-                    .footer(|f| {
-                        f.text(format!(
-                            "{}. They are worth: {} Bucks",
-                            dino_collection.count_as_string(),
-                            dino_collection.transaction_count
-                        ))
-                    })
-                    .attachment(&filename)
-            })
-            .attachment(AttachmentType::Bytes {
-                data: image.into(),
-                filename,
-            })
-            .ephemeral(silent)
-    })
+    let embed = CreateEmbed::default()
+        .colour(0xffbf00)
+        .author(CreateEmbedAuthor::new(&author_name).icon_url(avatar_url(user)))
+        .title(format!("{}'s collection", &author_name))
+        .description(dino_collection.description())
+        .footer(CreateEmbedFooter::new(format!(
+            "{}. They are worth: {} Bucks",
+            dino_collection.count_as_string(),
+            dino_collection.transaction_count
+        )))
+        .attachment(&filename);
+
+    ctx.send(
+        CreateReply::default()
+            .embed(embed)
+            .attachment(CreateAttachment::bytes(image, filename))
+            .ephemeral(silent),
+    )
     .await?;
 
     Ok(())
@@ -418,14 +417,13 @@ async fn gift(
         format!("[{}]({})", dino, dino_record.hatch_message)
     };
 
-    ctx.send(|message| {
-        message.embed(|embed| {
-            embed.colour(0x990933).description(&format!(
-                "**{sender_name}** gifted {dino_name} to **{receiver_name}**! How kind!",
-            ))
-        })
-    })
-    .await?;
+    let embed = CreateEmbed::default()
+        .colour(0x990933)
+        .description(&format!(
+            "**{sender_name}** gifted {dino_name} to **{receiver_name}**! How kind!",
+        ));
+
+    ctx.send(CreateReply::default().embed(embed)).await?;
 
     transaction.commit().await?;
 
@@ -563,21 +561,19 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
         Are you SURE you want to do this?",
         num_to_sacrifice, num_to_create, dinos_at_risk
     );
-    let mut row = CreateActionRow::default();
-    row.create_button(|b| {
-        b.custom_id("slurpening-confirm")
-            .emoji('🔪')
-            .label("I AM 100% SURE".to_string())
-            .style(ButtonStyle::Danger)
-    });
+
+    let confirm_button = CreateButton::new("slurpening-confirm")
+        .emoji('🔪')
+        .label("I AM 100% SURE".to_string())
+        .style(ButtonStyle::Danger);
 
     let reply_handle = ctx
-        .send(|message| {
-            message
-                .components(|c| c.add_action_row(row))
+        .send(
+            CreateReply::default()
+                .components(vec![CreateActionRow::Buttons(vec![confirm_button])])
                 .content(content)
-                .ephemeral(true)
-        })
+                .ephemeral(true),
+        )
         .await?;
 
     while let Some(interaction) = reply_handle
@@ -585,7 +581,6 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
         .await?
         .await_component_interaction(ctx)
         .timeout(std::time::Duration::from_secs(10))
-        .collect_limit(1)
         .await
     {
         if interaction.data.custom_id != "slurpening-confirm" {
@@ -605,14 +600,12 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
         for _ in 0..num_to_create {
             let Some(parts) = generate_dino(&ctx.data().database, &fragments).await? else {
                 interaction
-                    .create_interaction_response(ctx, |response| {
-                        response.interaction_response_data(|data| {
-                            data.content(
-                                "Sorry but I couldn't generate a dino. Aborting slurpening.",
-                            )
-                            .ephemeral(true)
-                        })
-                    })
+                    .create_response(
+                        ctx,
+                        response(ephemeral_text_message(
+                            "Sorry but I couldn't generate a dino. Aborting slurpening.",
+                        )),
+                    )
                     .await?;
                 return Ok(());
             };
@@ -640,26 +633,18 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
             .map(|d| d.name.as_ref())
             .collect::<Vec<_>>()
             .join(", ");
+        let embed = CreateEmbed::default()
+            .colour(0xffbf00)
+            .author(CreateEmbedAuthor::new(&author_name).icon_url(author_avatar))
+            .title(format!("{}'s babies", &author_name))
+            .description(format!("{num_to_create} dinos came out: {new_dino_names}."))
+            .attachment(&filename);
 
         interaction
-            .create_interaction_response(ctx, |response| {
-                response.interaction_response_data(|data| {
-                    data.embed(|embed| {
-                        embed
-                            .colour(0xffbf00)
-                            .author(|a| a.name(&author_name).icon_url(author_avatar))
-                            .title(format!("{}'s babies", &author_name))
-                            .description(format!(
-                                "{num_to_create} dinos came out: {new_dino_names}."
-                            ))
-                            .attachment(&filename)
-                    })
-                    .add_file(AttachmentType::Bytes {
-                        data: Cow::Owned(image),
-                        filename,
-                    })
-                })
-            })
+            .create_response(
+                ctx,
+                response(embed_message(embed).add_file(CreateAttachment::bytes(image, filename))),
+            )
             .await?;
 
         update_last_user_action(&mut transaction, &user_id, UserAction::Slurp).await?;
@@ -669,11 +654,12 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
     }
 
     reply_handle
-        .edit(ctx, |message| {
-            message
-                .components(|c| c)
-                .content("Looks like you decided to hold off for now.")
-        })
+        .edit(
+            ctx,
+            CreateReply::default()
+                .components(Vec::new())
+                .content("Looks like you decided to hold off for now."),
+        )
         .await?;
     Ok(())
 }
@@ -1095,51 +1081,42 @@ async fn send_dino_embed(
     image_path: &Path,
     created_at: NaiveDateTime,
 ) -> Result<String> {
-    let mut row = CreateActionRow::default();
-    row.create_button(|b| {
-        b.custom_id(format!("{COVET_BUTTON}:{}", dino.id))
-            .emoji('👍')
-            .label("Covet".to_string())
-            .style(ButtonStyle::Success)
-    });
-    row.create_button(|b| {
-        b.custom_id(format!("{SHUN_BUTTON}:{}", dino.id))
-            .emoji('👎')
-            .label("Shun".to_string())
-            .style(ButtonStyle::Danger)
-    });
-    row.create_button(|b| {
-        b.custom_id(format!("{FAVOURITE_BUTTON}:{}", dino.id))
-            .emoji('🫶') // heart hands emoji
-            .label("Favourite".to_string())
-            .style(ButtonStyle::Secondary)
-    });
+    // let mut row = CreateActionRow::default();
+    let covet = CreateButton::new(format!("{COVET_BUTTON}:{}", dino.id))
+        .emoji('👍')
+        .label("Covet".to_string())
+        .style(ButtonStyle::Success);
+    let shun = CreateButton::new(format!("{SHUN_BUTTON}:{}", dino.id))
+        .emoji('👎')
+        .label("Shun".to_string())
+        .style(ButtonStyle::Danger);
+    let favourite = CreateButton::new(format!("{FAVOURITE_BUTTON}:{}", dino.id))
+        .emoji('🫶') // heart hands emoji
+        .label("Favourite".to_string())
+        .style(ButtonStyle::Secondary);
 
     let image_name = get_file_name(image_path);
+    let embed = CreateEmbed::default()
+        .colour(0x66ff99)
+        .author(CreateEmbedAuthor::new(owner_name).icon_url(owner_avatar))
+        .title(&dino.name)
+        .description(format!(
+            "**Created:** <t:{}>",
+            created_at.and_utc().timestamp()
+        ))
+        .footer(CreateEmbedFooter::new(format!(
+            "{} is worth {} Dino Bucks!\nHotness Rating: {}",
+            &dino.name, dino.worth, dino.hotness
+        )))
+        .attachment(image_name);
 
     let reply_handle = ctx
-        .send(|message| {
-            message
-                .components(|c| c.add_action_row(row))
-                .attachment(AttachmentType::Path(image_path))
-                .embed(|embed| {
-                    embed
-                        .colour(0x66ff99)
-                        .author(|author| author.name(owner_name).icon_url(owner_avatar))
-                        .title(&dino.name)
-                        .description(format!(
-                            "**Created:** <t:{}>",
-                            created_at.and_utc().timestamp()
-                        ))
-                        .footer(|f| {
-                            f.text(format!(
-                                "{} is worth {} Dino Bucks!\nHotness Rating: {}",
-                                &dino.name, dino.worth, dino.hotness
-                            ))
-                        })
-                        .attachment(image_name)
-                })
-        })
+        .send(
+            CreateReply::default()
+                .components(vec![CreateActionRow::Buttons(vec![covet, shun, favourite])])
+                .attachment(CreateAttachment::path(image_path).await?)
+                .embed(embed),
+        )
         .await?;
 
     let message_link = reply_handle.message().await?.link();
