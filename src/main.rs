@@ -148,7 +148,9 @@ async fn event_event_handler<'a>(
         }
         FullEvent::InteractionCreate { interaction } => {
             let interaction = interaction.clone();
-            let command = interaction.command().unwrap();
+            let Some(command) = interaction.command() else {
+                return Ok(());
+            };
 
             let map = user_data.simple_commands.read().await;
             let Some(guild_id) = command.guild_id else {
