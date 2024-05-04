@@ -1,7 +1,8 @@
 use crate::Context;
 
 use poise::serenity_prelude::{
-    Colour, Error, InteractionResponseType, Member, MessageComponentInteraction, User,
+    Colour, CreateInteractionResponse, CreateInteractionResponseMessage, Error,
+    InteractionResponseType, Member, MessageComponentInteraction, User,
 };
 use poise::ReplyHandle;
 use rand::rngs::StdRng;
@@ -10,6 +11,10 @@ use rand_seeder::Seeder;
 use serenity::builder::CreateActionRow;
 use std::borrow::Cow;
 use std::sync::Arc;
+
+pub fn text_message(text: impl Into<String>) -> CreateInteractionResponse {
+    CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().content(text))
+}
 
 pub async fn ephemeral_message<S: AsRef<str>>(
     ctx: Context<'_>,
