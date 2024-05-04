@@ -107,7 +107,7 @@ impl Character {
         self.stats[stat] / 2 - 5
     }
 
-    pub fn to_embed<'b>(&self) -> CreateEmbed {
+    pub fn to_embed(&self) -> CreateEmbed {
         CreateEmbed::default()
             .color(0x0099333)
             .title(&self.name)

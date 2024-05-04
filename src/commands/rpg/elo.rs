@@ -40,9 +40,9 @@ impl LadderPosition {
     }
 }
 
-impl Into<String> for LadderPosition {
-    fn into(self) -> String {
-        self.to_string()
+impl From<LadderPosition> for String {
+    fn from(val: LadderPosition) -> Self {
+        val.to_string()
     }
 }
 
