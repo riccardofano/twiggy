@@ -11,9 +11,10 @@ CREATE TABLE Dino (
 
     body TEXT NOT NULL,
     mouth TEXT NOT NULL,
-    eyes TEXT NOT NULL,
-    UNIQUE (body, mouth, eyes)
+    eyes TEXT NOT NULL
 );
+
+CREATE UNIQUE INDEX idx_body_mouth_eyes ON Dino(body, mouth, eyes);
 
 CREATE TABLE DinoUser (
     id TEXT NOT NULL PRIMARY KEY,
