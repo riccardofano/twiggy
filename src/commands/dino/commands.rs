@@ -142,7 +142,7 @@ impl Timings {
     }
 
     fn ensure_outside_cooldown(&self) -> Result<()> {
-        if self.attempt > self.reset {
+        if self.attempt < self.reset {
             match self.kind {
                 UserAction::Hatch(_) => bail!(
                     "Dont be greedy! You can hatch again <t:{}:R>.",
@@ -872,6 +872,7 @@ fn generate_dino_collection_image(collection: &[DinoRecord]) -> Result<Vec<u8>> 
     Ok(bytes)
 }
 
+#[derive(Debug)]
 struct UserRecord {
     last_hatch: NaiveDateTime,
     last_slurp: NaiveDateTime,

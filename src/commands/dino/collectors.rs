@@ -72,22 +72,14 @@ async fn handle_dino_collector(
     let dino_id = split_btn_id.get(1);
 
     let Some(dino_id) = dino_id else {
-        interaction
-            .create_response(
-                ctx,
-                response(ephemeral_text_message("Could not find a dino id")),
-            )
-            .await?;
+        let resp = response(ephemeral_text_message("Could not find a dino id"));
+        interaction.create_response(ctx, resp).await?;
         return Ok(());
     };
 
     let Ok(dino_id) = dino_id.parse::<i64>() else {
-        interaction
-            .create_response(
-                ctx,
-                response(ephemeral_text_message("Dino id is not valid.")),
-            )
-            .await?;
+        let resp = response(ephemeral_text_message("Dino id is not valid."));
+        interaction.create_response(ctx, resp).await?;
         return Ok(());
     };
 
@@ -99,35 +91,14 @@ async fn handle_dino_collector(
 
         let dino_name = &old_embed.title.as_deref().unwrap_or("Unknown dino");
         let new_title = format!("{dino_name} is no longer with us 😔");
+        let new_embed = CreateEmbed::from(old_embed).title(new_title);
 
-        let dino_image_url = &old_embed
-            .image
-            .clone()
-            .expect("Dinos embeds should always have an image")
-            .url;
-        let url_without_query = match dino_image_url.split_once('?') {
-            Some((url, _query)) => url,
-            None => dino_image_url.as_str(),
-        };
-        let dino_image_name = url_without_query
-            .split('/')
-            .last()
-            .expect("All images should have a file name");
-
-        let new_embed = CreateEmbed::from(old_embed)
-            .attachment(dino_image_name)
-            .title(new_title);
-
-        interaction
-            .create_response(
-                ctx,
-                update_response(embed_message(new_embed).components(Vec::new())),
-            )
-            .await?;
+        let resp = update_response(embed_message(new_embed).components(Vec::new()));
+        interaction.create_response(ctx, resp).await?;
         return Ok(());
     }
 
-    let (dino_name, dino_image_name) = dino.unwrap();
+    let (dino_name, _dino_image_name) = dino.unwrap();
 
     let button_type = match &custom_id {
         b if b.starts_with(COVET_BUTTON) => TransactionType::Covet,
@@ -146,17 +117,14 @@ async fn handle_dino_collector(
     } else {
         let (worth, hotness) = calculate_dino_score(&mut transaction, dino_id).await?;
 
-        // NOTE: to update the old embed the attachment must be set the
-        // name of the file of the old image otherwise two images will
-        // appear, one outside the embed (the old file) and one in the
-        // embed with the new url discord gave it.
+        // NOTE NOTE: You don't need to update the attachment anymore.
         let old_embed = interaction.message.embeds[0].clone();
-        let new_embed = CreateEmbed::from(old_embed)
-            .title(&dino_name)
-            .footer(CreateEmbedFooter::new(format!(
-                "{dino_name} is worth {worth} Dino Bucks!\nHotness Rating: {hotness}"
-            )))
-            .attachment(dino_image_name);
+        let new_embed =
+            CreateEmbed::from(old_embed)
+                .title(&dino_name)
+                .footer(CreateEmbedFooter::new(format!(
+                    "{dino_name} is worth {worth} Dino Bucks!\nHotness Rating: {hotness}"
+                )));
 
         interaction
             .create_response(ctx, update_response(embed_message(new_embed)))
