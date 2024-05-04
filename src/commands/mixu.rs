@@ -2,7 +2,6 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use crate::{Context, Result};
 
-use anyhow::anyhow;
 use poise::serenity_prelude::{Emoji, Mention, UserId};
 use rand::{seq::SliceRandom, thread_rng};
 use serenity::futures::TryFutureExt;
@@ -25,7 +24,7 @@ pub async fn initialize_best_mixu_score(db: &SqlitePool) -> Result<Option<Atomic
 }
 
 /// Generate a random mixu
-#[poise::command(slash_command, prefix_command)]
+#[poise::command(guild_only, slash_command, prefix_command)]
 pub async fn mixu(ctx: Context<'_>) -> Result<()> {
     let mut positions = MIKU_POSITIONS;
     positions.shuffle(&mut thread_rng());
@@ -45,7 +44,7 @@ pub async fn mixu(ctx: Context<'_>) -> Result<()> {
 }
 
 /// Have Miku stare into your soul
-#[poise::command(slash_command, prefix_command)]
+#[poise::command(guild_only, slash_command, prefix_command)]
 pub async fn mikustare(ctx: Context<'_>) -> Result<()> {
     let pieces = MIXU_PIECES
         .get_or_try_init(|| retrieve_mixu_emojis(ctx))
@@ -58,7 +57,7 @@ pub async fn mikustare(ctx: Context<'_>) -> Result<()> {
 }
 
 /// See who sits on top of the mixu leaderboard
-#[poise::command(slash_command, prefix_command)]
+#[poise::command(guild_only, slash_command, prefix_command)]
 pub async fn bestmixu(ctx: Context<'_>) -> Result<()> {
     let record = sqlx::query!("SELECT user_id, tiles FROM BestMixu ORDER BY rowid DESC LIMIT 1")
         .fetch_optional(&ctx.data().database)
@@ -81,7 +80,7 @@ pub async fn bestmixu(ctx: Context<'_>) -> Result<()> {
 
     ctx.say(format!(
         "Best mixu by {}",
-        Mention::User(UserId(user_id as u64))
+        Mention::User(UserId::new(user_id as u64))
     ))
     .await?;
     ctx.say(message).await?;
@@ -106,7 +105,9 @@ fn stringify_mixu(pieces: &[Emoji], positions: &[usize], banner: &str) -> String
 }
 
 async fn retrieve_mixu_emojis(ctx: Context<'_>) -> Result<Vec<Emoji>> {
-    let guild = ctx.guild().ok_or_else(|| anyhow!("Failed to load guild"))?;
+    let guild = ctx
+        .guild_id()
+        .expect("Expected Mixu commands to be guild only");
     let emojis = guild.emojis(ctx).await?;
 
     let mut miku_emoji_ids = Vec::with_capacity(16);
