@@ -220,7 +220,9 @@ fn assert_no_recent_loss(stats: &CharacterPastStats, name: &str) -> Result<()> {
     let loss_cooldown_duration = chrono::Duration::from_std(LOSS_COOLDOWN)?;
 
     if stats.last_loss + loss_cooldown_duration > now {
-        let time_until_duel = (stats.last_loss + loss_cooldown_duration).timestamp();
+        let time_until_duel = (stats.last_loss + loss_cooldown_duration)
+            .and_utc()
+            .timestamp();
 
         bail!("{name} you have recently lost a duel. Please try again <t:{time_until_duel}:R>.");
     }

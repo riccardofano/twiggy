@@ -99,8 +99,9 @@ impl Timings {
         // At midnight the day after the last hatch
         let reset_time = last_hatch_date.and_hms_opt(0, 0, 0).unwrap() + chrono::Duration::days(1);
         // At midnight the day after this most recent attempt
-        let next_try =
-            (attempt.date().and_hms_opt(0, 0, 0).unwrap() + chrono::Duration::days(1)).timestamp();
+        let next_try = (attempt.date().and_hms_opt(0, 0, 0).unwrap() + chrono::Duration::days(1))
+            .and_utc()
+            .timestamp();
 
         Timings {
             attempt,
@@ -118,7 +119,7 @@ impl Timings {
         Timings {
             attempt,
             reset: time_until_next_slurp,
-            next_try: time_until_next_slurp.timestamp(),
+            next_try: time_until_next_slurp.and_utc().timestamp(),
             kind: UserAction::Slurp,
         }
     }
@@ -131,7 +132,7 @@ impl Timings {
         Timings {
             attempt,
             reset: time_until_next_gift,
-            next_try: time_until_next_gift.timestamp(),
+            next_try: time_until_next_gift.and_utc().timestamp(),
             kind: UserAction::Gift,
         }
     }
@@ -1126,7 +1127,10 @@ async fn send_dino_embed(
                         .colour(0x66ff99)
                         .author(|author| author.name(owner_name).icon_url(owner_avatar))
                         .title(&dino.name)
-                        .description(format!("**Created:** <t:{}>", created_at.timestamp()))
+                        .description(format!(
+                            "**Created:** <t:{}>",
+                            created_at.and_utc().timestamp()
+                        ))
                         .footer(|f| {
                             f.text(format!(
                                 "{} is worth {} Dino Bucks!\nHotness Rating: {}",

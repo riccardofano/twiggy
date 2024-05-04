@@ -346,7 +346,7 @@ impl DuelUser {
 
         let loss_cooldown_duration = chrono::Duration::minutes(LOSS_COOLDOWN);
         if last_loss + loss_cooldown_duration > now {
-            let time_until_duel = (last_loss + loss_cooldown_duration).timestamp();
+            let time_until_duel = (last_loss + loss_cooldown_duration).and_utc().timestamp();
             bail!("{self} you have recently lost a duel. Please try again <t:{time_until_duel}:R>.")
         }
 

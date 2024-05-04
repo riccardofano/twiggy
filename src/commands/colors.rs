@@ -444,14 +444,14 @@ async fn reject_on_cooldown(ctx: Context<'_>) -> Result<()> {
     if permitted_time_from_random > now {
         bail!(
             "You recently randomed/gambled, you can change your color <t:{}:R>",
-            permitted_time_from_random.timestamp()
+            permitted_time_from_random.and_utc().timestamp()
         );
     }
 
     if permitted_time_from_loss > now {
         bail!(
             "You recently dueled and lost, you can change your color <t:{}:R>",
-            permitted_time_from_loss.timestamp()
+            permitted_time_from_loss.and_utc().timestamp()
         );
     }
 
