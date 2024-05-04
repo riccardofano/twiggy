@@ -24,7 +24,8 @@ pub async fn ask(
 
     let now = Utc::now().timestamp();
     if last_called.load(Ordering::Relaxed) + ASK_COOLDOWN > now {
-        ephemeral_reply(ctx, "The ask command is on cooldown.").await?;
+        ctx.send(ephemeral_reply("The ask command is on cooldown."))
+            .await?;
         return Ok(());
     }
 
