@@ -102,24 +102,16 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         }
 
         if interaction.user.id == challenger.id {
-            interaction
-                .create_response(
-                    ctx,
-                    response(text_message("You cannot join your own fight.")),
-                )
-                .await?;
+            let resp = response(ephemeral_text_message("You cannot join your own fight."));
+            interaction.create_response(ctx, resp).await?;
             continue;
         }
 
         if !custom_data_lock.read().await.in_progress {
-            interaction
-                .create_response(
-                    ctx,
-                    response(ephemeral_text_message(
-                        "Someone beat you to the challenge already.",
-                    )),
-                )
-                .await?;
+            let resp = response(ephemeral_text_message(
+                "Someone beat you to the challenge already.",
+            ));
+            interaction.create_response(ctx, resp).await?;
             continue;
         }
 
