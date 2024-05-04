@@ -10,18 +10,22 @@ pub async fn sudoku(
     ctx: Context<'_>,
     #[description = "Your final words"] message: Option<String>,
 ) -> Result<()> {
-    let Some(guild) = ctx.guild() else {
-        ephemeral_reply(ctx, "Could not find the guild you're in.").await?;
-        return Ok(());
-    };
+    let guild = ctx
+        .partial_guild()
+        .await
+        .expect("Expected /sudoku to be guild only.");
 
     if ctx.author().id == guild.owner_id {
-        ephemeral_reply(ctx, "Sadly I cannot time out the owner of the server.").await?;
+        ctx.send(ephemeral_reply(
+            "Sadly I cannot time out the owner of the server.",
+        ))
+        .await?;
         return Ok(());
     }
 
     let Some(mut member) = ctx.author_member().await else {
-        ephemeral_reply(ctx, "Could not get your member details.").await?;
+        ctx.send(ephemeral_reply("Could not get your member details."))
+            .await?;
         return Ok(());
     };
 
