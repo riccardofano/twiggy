@@ -3,11 +3,14 @@ use std::fmt::Display;
 
 use anyhow::bail;
 use poise::futures_util::StreamExt;
-use poise::serenity_prelude::{self as serenity, MessageComponentInteraction};
-use poise::serenity_prelude::{ComponentInteractionCollectorBuilder, CreateEmbed};
+use poise::serenity_prelude::{
+    self as serenity, ComponentInteraction, ComponentInteractionCollector,
+};
+use poise::serenity_prelude::{CreateEmbed, CreateEmbedFooter};
 use sqlx::SqliteConnection;
 
 use crate::commands::dino::{COVET_BUTTON, FAVOURITE_BUTTON, SHUN_BUTTON};
+use crate::common::{embed_message, ephemeral_text_message, response, update_response};
 use crate::Data;
 use crate::Result;
 
@@ -40,9 +43,9 @@ impl Display for TransactionType {
 }
 
 pub async fn setup_dino_collector(ctx: &serenity::Context, user_data: &Data) -> Result<()> {
-    let collector = ComponentInteractionCollectorBuilder::new(ctx)
+    let collector = ComponentInteractionCollector::new(ctx)
         .filter(|f| f.data.custom_id.starts_with("dino-"))
-        .build();
+        .stream();
     println!("Setup dino collector");
 
     let _: Vec<_> = collector
@@ -62,7 +65,7 @@ pub async fn setup_dino_collector(ctx: &serenity::Context, user_data: &Data) -> 
 async fn handle_dino_collector(
     ctx: &serenity::Context,
     user_data: &Data,
-    interaction: &MessageComponentInteraction,
+    interaction: &ComponentInteraction,
 ) -> Result<()> {
     let custom_id = &interaction.data.custom_id;
     let split_btn_id = custom_id.split(':').collect::<Vec<_>>();
@@ -70,20 +73,20 @@ async fn handle_dino_collector(
 
     let Some(dino_id) = dino_id else {
         interaction
-            .create_interaction_response(&ctx, |r| {
-                r.interaction_response_data(|d| {
-                    d.content("Could not find a dino id.").ephemeral(true)
-                })
-            })
+            .create_response(
+                ctx,
+                response(ephemeral_text_message("Could not find a dino id")),
+            )
             .await?;
         return Ok(());
     };
 
     let Ok(dino_id) = dino_id.parse::<i64>() else {
         interaction
-            .create_interaction_response(&ctx, |r| {
-                r.interaction_response_data(|d| d.content("Dino id is not valid.").ephemeral(true))
-            })
+            .create_response(
+                ctx,
+                response(ephemeral_text_message("Dino id is not valid.")),
+            )
             .await?;
         return Ok(());
     };
@@ -111,16 +114,15 @@ async fn handle_dino_collector(
             .last()
             .expect("All images should have a file name");
 
-        let mut new_embed = CreateEmbed::from(old_embed);
-        new_embed.attachment(dino_image_name);
-        new_embed.title(new_title);
+        let new_embed = CreateEmbed::from(old_embed)
+            .attachment(dino_image_name)
+            .title(new_title);
 
         interaction
-            .create_interaction_response(&ctx, |response| {
-                response
-                    .kind(serenity::InteractionResponseType::UpdateMessage)
-                    .interaction_response_data(|d| d.set_embed(new_embed).components(|c| c))
-            })
+            .create_response(
+                ctx,
+                update_response(embed_message(new_embed).components(Vec::new())),
+            )
             .await?;
         return Ok(());
     }
@@ -134,13 +136,12 @@ async fn handle_dino_collector(
         _ => bail!("unknown dino button pressed"),
     };
 
-    let response = handle_button_press(interaction, &mut transaction, dino_id, button_type).await?;
+    let press_response =
+        handle_button_press(interaction, &mut transaction, dino_id, button_type).await?;
 
-    if let Some(content) = response {
+    if let Some(content) = press_response {
         interaction
-            .create_interaction_response(&ctx, |r| {
-                r.interaction_response_data(|d| d.content(&content).ephemeral(true))
-            })
+            .create_response(ctx, response(ephemeral_text_message(&content)))
             .await?;
     } else {
         let (worth, hotness) = calculate_dino_score(&mut transaction, dino_id).await?;
@@ -150,21 +151,15 @@ async fn handle_dino_collector(
         // appear, one outside the embed (the old file) and one in the
         // embed with the new url discord gave it.
         let old_embed = interaction.message.embeds[0].clone();
-        let mut new_embed = CreateEmbed::from(old_embed);
-        new_embed.title(&dino_name);
-        new_embed.footer(|f| {
-            f.text(format!(
+        let new_embed = CreateEmbed::from(old_embed)
+            .title(&dino_name)
+            .footer(CreateEmbedFooter::new(format!(
                 "{dino_name} is worth {worth} Dino Bucks!\nHotness Rating: {hotness}"
-            ))
-        });
-        new_embed.attachment(dino_image_name);
+            )))
+            .attachment(dino_image_name);
 
         interaction
-            .create_interaction_response(&ctx, |response| {
-                response
-                    .kind(serenity::InteractionResponseType::UpdateMessage)
-                    .interaction_response_data(|d| d.set_embed(new_embed))
-            })
+            .create_response(ctx, update_response(embed_message(new_embed)))
             .await?;
     }
 
@@ -174,7 +169,7 @@ async fn handle_dino_collector(
 }
 
 async fn handle_button_press(
-    interaction: &MessageComponentInteraction,
+    interaction: &ComponentInteraction,
     conn: &mut SqliteConnection,
     dino_id: i64,
     button_type: TransactionType,

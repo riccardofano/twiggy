@@ -7,7 +7,7 @@ use std::sync::{atomic::AtomicI64, OnceLock};
 
 use anyhow::Result;
 use commands::*;
-use common::text_message;
+use common::{response, text_message};
 use lru::LruCache;
 use poise::serenity_prelude::{self as serenity, CreateCommand, FullEvent};
 use tokio::sync::{Mutex, RwLock};
@@ -159,7 +159,9 @@ async fn event_event_handler<'a>(
             };
 
             if let Some(text) = guild_commands.get(&command.data.name) {
-                command.create_response(ctx, text_message(text)).await?;
+                command
+                    .create_response(ctx, response(text_message(text)))
+                    .await?;
             };
         }
         _ => {}

@@ -1,7 +1,7 @@
 use crate::Context;
 
 use poise::serenity_prelude::{
-    Colour, CreateInteractionResponse, CreateInteractionResponseMessage, Error,
+    Colour, CreateEmbed, CreateInteractionResponse, CreateInteractionResponseMessage, Error,
     InteractionResponseType, Member, MessageComponentInteraction, User,
 };
 use poise::ReplyHandle;
@@ -12,8 +12,23 @@ use serenity::builder::CreateActionRow;
 use std::borrow::Cow;
 use std::sync::Arc;
 
-pub fn text_message(text: impl Into<String>) -> CreateInteractionResponse {
-    CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().content(text))
+pub fn response(message: CreateInteractionResponseMessage) -> CreateInteractionResponse {
+    CreateInteractionResponse::Message(message)
+}
+pub fn update_response(message: CreateInteractionResponseMessage) -> CreateInteractionResponse {
+    CreateInteractionResponse::UpdateMessage(message)
+}
+
+pub fn text_message(text: impl Into<String>) -> CreateInteractionResponseMessage {
+    CreateInteractionResponseMessage::new().content(text)
+}
+pub fn ephemeral_text_message(text: impl Into<String>) -> CreateInteractionResponseMessage {
+    CreateInteractionResponseMessage::new()
+        .content(text)
+        .ephemeral(true)
+}
+pub fn embed_message(embed: CreateEmbed) -> CreateInteractionResponseMessage {
+    CreateInteractionResponseMessage::new().embed(embed)
 }
 
 pub async fn ephemeral_message<S: AsRef<str>>(
