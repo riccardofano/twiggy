@@ -28,6 +28,14 @@ pub fn ephemeral_text_message(text: impl Into<String>) -> CreateInteractionRespo
 pub fn embed_message(embed: CreateEmbed) -> CreateInteractionResponseMessage {
     CreateInteractionResponseMessage::new().embed(embed)
 }
+pub fn message_with_buttons(
+    text: impl Into<String>,
+    rows: Vec<CreateActionRow>,
+) -> CreateInteractionResponseMessage {
+    CreateInteractionResponseMessage::new()
+        .content(text)
+        .components(rows)
+}
 
 pub fn ephemeral_reply(content: impl Into<String>) -> CreateReply {
     CreateReply::default().content(content).ephemeral(true)
