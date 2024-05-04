@@ -4,15 +4,18 @@ use super::fight::RPGFight;
 
 use crate::commands::rpg::elo::find_ladder_rank;
 use crate::common::{
-    avatar_url, ephemeral_interaction_response, ephemeral_message, name, nickname,
-    send_message_with_row, Score,
+    avatar_url, ephemeral_reply, ephemeral_text_message, name, nickname, reply_with_buttons,
+    response, text_message, update_response, Score,
 };
 use crate::Context;
 
 use anyhow::{bail, Result};
 use chrono::{NaiveDateTime, Utc};
-use poise::serenity_prelude::{self as serenity, Mention, User, UserId};
 use poise::serenity_prelude::{ButtonStyle, CreateActionRow};
+use poise::serenity_prelude::{
+    CreateButton, CreateEmbed, CreateEmbedAuthor, Mention, User, UserId,
+};
+use poise::CreateReply;
 use sqlx::{Connection, QueryBuilder, SqliteConnection};
 use std::str::FromStr;
 use std::time::Duration;
@@ -45,7 +48,8 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
     let custom_data_lock = unwrap_custom_data(ctx);
 
     if custom_data_lock.read().await.in_progress {
-        ephemeral_message(ctx, "A RPG fight is already in progress").await?;
+        ctx.send(ephemeral_reply("A RPG fight is already in progress"))
+            .await?;
         return Ok(());
     }
 
@@ -57,24 +61,32 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         Ok(stats) => stats,
         Err(e) => {
             eprintln!("Could not retrieve {}'s last loss: {e:?}", challenger.name);
-            ephemeral_message(ctx, "Something went wrong when trying to join the fight.").await?;
+            ctx.send(ephemeral_reply(
+                "Something went wrong when trying to join the fight.",
+            ))
+            .await?;
             return Ok(());
         }
     };
 
     if let Err(e) = assert_no_recent_loss(&challenger_stats, challenger_name) {
-        ephemeral_message(ctx, e.to_string()).await?;
+        ctx.send(ephemeral_reply(e.to_string())).await?;
         return Ok(());
     };
 
     let challenger_character = Character::new(
-        challenger.id.0,
+        challenger.id.get(),
         challenger_name,
         &challenger_nick.as_deref(),
     );
 
     let initial_msg = format!("{challenger_name} is throwing down the gauntlet in challenge...");
-    let accept_reply = send_message_with_row(ctx, initial_msg, create_accept_button()).await?;
+    let accept_reply = ctx
+        .send(reply_with_buttons(
+            initial_msg,
+            vec![create_accept_button()],
+        ))
+        .await?;
 
     update_in_progress_status(custom_data_lock, true).await;
 
@@ -90,18 +102,16 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         }
 
         if interaction.user.id == challenger.id {
-            ephemeral_interaction_response(&ctx, interaction, "You cannot join your own fight.")
-                .await?;
+            let resp = response(ephemeral_text_message("You cannot join your own fight."));
+            interaction.create_response(ctx, resp).await?;
             continue;
         }
 
         if !custom_data_lock.read().await.in_progress {
-            ephemeral_interaction_response(
-                &ctx,
-                interaction,
-                "Someone beat you to the challenge already",
-            )
-            .await?;
+            let resp = response(ephemeral_text_message(
+                "Someone beat you to the challenge already.",
+            ));
+            interaction.create_response(ctx, resp).await?;
             continue;
         }
 
@@ -114,18 +124,22 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
             Err(e) => {
                 eprintln!("Could not retrieve {}'s stats {e:?}", accepter.name);
                 let err_message = "Something went wrong when trying to retrieve your past stats.";
-                ephemeral_interaction_response(&ctx, interaction, err_message).await?;
+                interaction
+                    .create_response(ctx, response(ephemeral_text_message(err_message)))
+                    .await?;
                 continue;
             }
         };
 
         if let Err(e) = assert_no_recent_loss(&accepter_stats, accepter_name) {
-            ephemeral_interaction_response(&ctx, interaction, e.to_string()).await?;
+            interaction
+                .create_response(ctx, response(ephemeral_text_message(e.to_string())))
+                .await?;
             continue;
         }
 
         let accepter_character =
-            Character::new(accepter.id.0, accepter_name, &accepter_nick.as_deref());
+            Character::new(accepter.id.get(), accepter_name, &accepter_nick.as_deref());
 
         let mut fight = RPGFight::new(challenger_character, accepter_character);
         let fight_result = fight.fight();
@@ -137,7 +151,7 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
 
         let new_challenger_elo = update_character_stats(
             &mut transaction,
-            challenger.id.0,
+            challenger.id.get(),
             challenger_stats.elo_rank,
             accepter_stats.elo_rank,
             fight_result.to_score(true),
@@ -146,7 +160,7 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
 
         let new_accepter_elo = update_character_stats(
             &mut transaction,
-            accepter.id.0,
+            accepter.id.get(),
             accepter_stats.elo_rank,
             challenger_stats.elo_rank,
             fight_result.to_score(false),
@@ -162,7 +176,7 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         .await?;
 
         transaction.commit().await?;
-        update_summary_cache(ctx, reply_msg.id.0, &fight_log).await;
+        update_summary_cache(ctx, reply_msg.id.get(), &fight_log).await;
 
         let elo_change_summary = format!(
             "**{challenger_name}**{} [{new_challenger_elo}]. \
@@ -171,31 +185,27 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
             calculate_lp_difference(accepter_stats.elo_rank, new_accepter_elo)
         );
 
-        // NOTE: To edit the original message after a button has been pressed,
-        // you first need to create an interaction response, this is allows us
-        // to avoid getting the `This interaction failed` message, and then
-        // using the Kind:UpdateMessage update the original message with the new
-        // content/components otherwise you'd just end up sending a new message.
         interaction
-            .create_interaction_response(ctx, |r| {
-                r.kind(serenity::InteractionResponseType::UpdateMessage)
-                    .interaction_response_data(|d| {
-                        d.content(format!("{}\n{}", fight.summary(), elo_change_summary))
-                            .components(|c| c.set_action_row(create_summary_button()))
-                    })
-            })
+            .create_response(
+                ctx,
+                update_response(
+                    text_message(format!("{}\n{}", fight.summary(), elo_change_summary))
+                        .components(vec![create_summary_button()]),
+                ),
+            )
             .await?;
 
         return Ok(());
     }
 
     accept_reply
-        .edit(ctx, |r| {
-            r.content(format!(
-                "{challenger_name} failed to find someone to fight."
-            ))
-            .components(|c| c)
-        })
+        .edit(
+            ctx,
+            reply_with_buttons(
+                format!("{challenger_name} failed to find someone to fight."),
+                Vec::new(),
+            ),
+        )
         .await?;
 
     update_in_progress_status(custom_data_lock, false).await;
@@ -220,7 +230,9 @@ fn assert_no_recent_loss(stats: &CharacterPastStats, name: &str) -> Result<()> {
     let loss_cooldown_duration = chrono::Duration::from_std(LOSS_COOLDOWN)?;
 
     if stats.last_loss + loss_cooldown_duration > now {
-        let time_until_duel = (stats.last_loss + loss_cooldown_duration).timestamp();
+        let time_until_duel = (stats.last_loss + loss_cooldown_duration)
+            .and_utc()
+            .timestamp();
 
         bail!("{name} you have recently lost a duel. Please try again <t:{time_until_duel}:R>.");
     }
@@ -230,7 +242,7 @@ fn assert_no_recent_loss(stats: &CharacterPastStats, name: &str) -> Result<()> {
 
 async fn retrieve_user_stats(ctx: Context<'_>, user: &User) -> Result<CharacterPastStats> {
     let mut conn = ctx.data().database.acquire().await?;
-    get_character_stats(&mut conn, user.id.0).await
+    get_character_stats(&mut conn, user.id.get()).await
 }
 
 async fn update_summary_cache(ctx: Context<'_>, message_id: u64, log: &str) {
@@ -242,27 +254,21 @@ async fn update_summary_cache(ctx: Context<'_>, message_id: u64, log: &str) {
 }
 
 fn create_accept_button() -> CreateActionRow {
-    let mut row = CreateActionRow::default();
-    row.create_button(|f| {
-        f.custom_id("rpg-btn")
-            .emoji('⚔')
-            .label("Accept Fight".to_string())
-            .style(ButtonStyle::Primary)
-    });
+    let btn = CreateButton::new("rpg-btn")
+        .emoji('⚔')
+        .label("Accept Fight".to_string())
+        .style(ButtonStyle::Primary);
 
-    row
+    CreateActionRow::Buttons(vec![btn])
 }
 
 fn create_summary_button() -> CreateActionRow {
-    let mut summary_row = CreateActionRow::default();
-    summary_row.create_button(|f| {
-        f.custom_id("rpg-summary")
-            .emoji('📖')
-            .label("See summary".to_string())
-            .style(ButtonStyle::Secondary)
-    });
+    let btn = CreateButton::new("rpg-summary")
+        .emoji('📖')
+        .label("See summary".to_string())
+        .style(ButtonStyle::Secondary);
 
-    summary_row
+    CreateActionRow::Buttons(vec![btn])
 }
 
 /// Preview what your character would look like with a new nickname
@@ -273,14 +279,19 @@ async fn preview(
     #[description = "Whether the message will be shown to everyone or not"] silent: Option<bool>,
 ) -> Result<()> {
     if name.len() >= 256 {
-        ephemeral_message(ctx, "Name have fewer than 256 characters.").await?;
+        ctx.send(ephemeral_reply("Name must have fewer than 256 characters."))
+            .await?;
         return Ok(());
     }
 
     let silent = silent.unwrap_or(true);
-    let character = Character::new(ctx.author().id.0, &name, &Some(&name));
-    ctx.send(|r| r.embed(|e| character.to_embed(e)).ephemeral(silent))
-        .await?;
+    let character = Character::new(ctx.author().id.get(), &name, &Some(&name));
+    ctx.send(
+        CreateReply::default()
+            .embed(character.to_embed())
+            .ephemeral(silent),
+    )
+    .await?;
 
     Ok(())
 }
@@ -297,10 +308,14 @@ async fn character(
 
     let nick = nickname(&ctx, user).await;
     let name = nick.as_deref().unwrap_or(&user.name);
-    let character = Character::new(user.id.0, name, &nick.as_deref());
+    let character = Character::new(user.id.get(), name, &nick.as_deref());
 
-    ctx.send(|r| r.embed(|e| character.to_embed(e)).ephemeral(silent))
-        .await?;
+    ctx.send(
+        CreateReply::default()
+            .embed(character.to_embed())
+            .ephemeral(silent),
+    )
+    .await?;
 
     Ok(())
 }
@@ -316,10 +331,9 @@ async fn stats(ctx: Context<'_>, user: Option<User>, silent: Option<bool>) -> Re
     let character_scoresheet =
         try_get_character_scoresheet(&mut conn, &user.id.to_string()).await?;
     let Some(user_record) = character_scoresheet else {
-        ephemeral_message(
-            ctx,
-            &format!("Hmm, {user_name}... It seems you are yet to test your steel."),
-        )
+        ctx.send(ephemeral_reply(&format!(
+            "Hmm, {user_name}... It seems you are yet to test your steel."
+        )))
         .await?;
         return Ok(());
     };
@@ -348,20 +362,17 @@ async fn stats(ctx: Context<'_>, user: Option<User>, silent: Option<bool>) -> Re
         "{} - {} *{} League*",
         floor_elo, floor_rank.icon, floor_rank.name
     );
+    let embed = CreateEmbed::default()
+        .colour(0x009933)
+        .author(CreateEmbedAuthor::new(title).icon_url(avatar_url(user)))
+        .fields(vec![
+            ("Current Rank", current_desc, false),
+            ("Peak Rank", peak_desc, false),
+            ("Floor rank", floor_desc, false),
+        ]);
 
-    ctx.send(|message| {
-        message.ephemeral(silent).embed(|embed| {
-            embed
-                .colour(0x009933)
-                .author(|a| a.icon_url(avatar_url(user)).name(title))
-                .fields(vec![
-                    ("Current Rank", current_desc, false),
-                    ("Peak Rank", peak_desc, false),
-                    ("Floor rank", floor_desc, false),
-                ])
-        })
-    })
-    .await?;
+    ctx.send(CreateReply::default().ephemeral(silent).embed(embed))
+        .await?;
 
     Ok(())
 }
@@ -396,19 +407,19 @@ async fn ladder(ctx: Context<'_>, silent: Option<bool>) -> Result<()> {
     };
 
     if fields.is_empty() {
-        ephemeral_message(ctx, "The arena is clean. No violence has happend yet.").await?;
+        ctx.send(ephemeral_reply(
+            "The arena is clean. No violence has happend yet.",
+        ))
+        .await?;
         return Ok(());
     }
+    let embed = CreateEmbed::default()
+        .colour(0x009933)
+        .title("The State of the Ladder")
+        .fields(fields);
 
-    ctx.send(|message| {
-        message.ephemeral(silent).embed(|embed| {
-            embed
-                .colour(0x009933)
-                .title("The State of the Ladder")
-                .fields(fields)
-        })
-    })
-    .await?;
+    ctx.send(CreateReply::default().ephemeral(silent).embed(embed))
+        .await?;
 
     Ok(())
 }

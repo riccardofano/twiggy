@@ -1,12 +1,16 @@
 use crate::common::{
-    avatar_url, colour, ephemeral_interaction_response, ephemeral_message, name,
-    send_interaction_update, send_message_with_row, Score,
+    avatar_url, colour, ephemeral_reply, name, reply_with_buttons, response, text_message,
+    update_response, Score,
 };
 use crate::Context;
 
 use anyhow::{bail, Result};
 use chrono::{DateTime, NaiveDateTime, Utc};
-use poise::serenity_prelude::{ButtonStyle, CreateActionRow, Member, User, UserId};
+use poise::serenity_prelude::{
+    ButtonStyle, CreateActionRow, CreateButton, CreateEmbed, CreateEmbedAuthor, Member, User,
+    UserId,
+};
+use poise::CreateReply;
 use rand::Rng;
 use sqlx::{Connection, QueryBuilder, SqliteExecutor};
 use std::cmp::Ordering;
@@ -35,17 +39,23 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
     let custom_data_lock = unwrap_duel_data(ctx);
 
     if custom_data_lock.read().await.in_progress {
-        ephemeral_message(ctx, "A duel is already in progress").await?;
+        ctx.send(ephemeral_reply("A duel is already in progress"))
+            .await?;
         return Ok(());
     }
 
     if let Err(e) = challenger.ensure_outside_cooldown(ctx).await {
-        ephemeral_message(ctx, e.to_string()).await?;
+        ctx.send(ephemeral_reply(e.to_string())).await?;
         return Ok(());
     }
 
     let initial_msg = format!("{challenger} is looking for a duel, press the button to accept.",);
-    let accept_reply = send_message_with_row(ctx, initial_msg, create_accept_button()).await?;
+    let accept_reply = ctx
+        .send(reply_with_buttons(
+            initial_msg,
+            vec![create_accept_button()],
+        ))
+        .await?;
 
     update_in_progress_status(custom_data_lock, true).await;
 
@@ -64,20 +74,21 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         // `iteraction failed` error but I'd like to find a way to just ignore
         // the click entirely with no response.
         if interaction.user.id == challenger.id {
-            ephemeral_interaction_response(&ctx, interaction, "You cannot join your own duel.")
-                .await?;
+            let resp = response(text_message("You cannot join your own duel."));
+            interaction.create_response(ctx, resp).await?;
             continue;
         }
 
         if !custom_data_lock.read().await.in_progress {
-            let msg = "Someone beat you to the challenge already";
-            ephemeral_interaction_response(&ctx, interaction, msg).await?;
+            let resp = response(text_message("Someone beat you to the challenge already"));
+            interaction.create_response(ctx, resp).await?;
             continue;
         }
 
         let accepter = DuelUser::from(ctx, &interaction.user).await;
         if let Err(e) = accepter.ensure_outside_cooldown(ctx).await {
-            ephemeral_interaction_response(&ctx, interaction, e.to_string()).await?;
+            let resp = response(text_message(e.to_string()));
+            interaction.create_response(ctx, resp).await?;
             continue;
         }
 
@@ -117,7 +128,8 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         transaction.commit().await?;
 
         let final_message = format!("{accepter} has rolled a {accepter_score} and {challenger} has rolled a {challenger_score}. {winner_text}");
-        send_interaction_update(ctx, &interaction, final_message).await?;
+        let update_resp = update_response(text_message(final_message));
+        interaction.create_response(ctx, update_resp).await?;
 
         update_in_progress_status(custom_data_lock, false).await;
 
@@ -126,7 +138,7 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
 
     let duel_timeout_msg = format!("{challenger} failed to find someone to duel.");
     accept_reply
-        .edit(ctx, |f| f.content(duel_timeout_msg).components(|c| c))
+        .edit(ctx, reply_with_buttons(duel_timeout_msg, Vec::new()))
         .await?;
 
     update_in_progress_status(custom_data_lock, false).await;
@@ -141,31 +153,30 @@ pub async fn duelstats(ctx: Context<'_>) -> Result<()> {
     let conn = &mut ctx.data().database.acquire().await?;
 
     let Some(stats) = get_duel_stats(conn, user.id.to_string()).await? else {
-        ephemeral_message(ctx, "You have never dueled before.").await?;
+        ctx.send(ephemeral_reply("You have never dueled before."))
+            .await?;
         return Ok(());
     };
 
     let name = name(&ctx, user).await;
     let colour = colour(&ctx).await.unwrap_or_else(|| 0x77618F.into());
+    let embed = CreateEmbed::default()
+        .colour(colour)
+        .description(format!(
+            "{}\n{}\n{}",
+            stats.current_streak(),
+            stats.best_streak(),
+            stats.worst_streak()
+        ))
+        .author(
+            CreateEmbedAuthor::new(format!(
+                "{name}'s scoresheet: {}-{}-{}",
+                stats.wins, stats.losses, stats.draws
+            ))
+            .icon_url(avatar_url(user)),
+        );
 
-    ctx.send(|r| {
-        r.embed(|e| {
-            e.colour(colour)
-                .description(format!(
-                    "{}\n{}\n{}",
-                    stats.current_streak(),
-                    stats.best_streak(),
-                    stats.worst_streak()
-                ))
-                .author(|a| {
-                    a.icon_url(avatar_url(user)).name(format!(
-                        "{name}'s scoresheet: {}-{}-{}",
-                        stats.wins, stats.losses, stats.draws
-                    ))
-                })
-        })
-    })
-    .await?;
+    ctx.send(CreateReply::default().embed(embed)).await?;
 
     Ok(())
 }
@@ -305,15 +316,12 @@ async fn update_in_progress_status(custom_data_lock: &RwLock<DuelData>, new_stat
 }
 
 fn create_accept_button() -> CreateActionRow {
-    let mut row = CreateActionRow::default();
-    row.create_button(|f| {
-        f.custom_id("duel-btn")
-            .emoji('🎲')
-            .label("Accept Duel".to_string())
-            .style(ButtonStyle::Primary)
-    });
+    let btn = CreateButton::new("duel-btn")
+        .emoji('🎲')
+        .label("Accept Duel".to_string())
+        .style(ButtonStyle::Primary);
 
-    row
+    CreateActionRow::Buttons(vec![btn])
 }
 
 struct DuelUser {
@@ -346,7 +354,7 @@ impl DuelUser {
 
         let loss_cooldown_duration = chrono::Duration::minutes(LOSS_COOLDOWN);
         if last_loss + loss_cooldown_duration > now {
-            let time_until_duel = (last_loss + loss_cooldown_duration).timestamp();
+            let time_until_duel = (last_loss + loss_cooldown_duration).and_utc().timestamp();
             bail!("{self} you have recently lost a duel. Please try again <t:{time_until_duel}:R>.")
         }
 

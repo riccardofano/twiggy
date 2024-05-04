@@ -1,19 +1,23 @@
 use anyhow::bail;
 use chrono::{NaiveDateTime, Utc};
 use image::{imageops::overlay, io::Reader, ImageBuffer, ImageOutputFormat, RgbaImage};
-use poise::serenity_prelude::{AttachmentType, ButtonStyle, CreateActionRow, User, UserId};
+use poise::serenity_prelude::{
+    ButtonStyle, CreateActionRow, CreateAttachment, CreateButton, CreateEmbed, CreateEmbedAuthor,
+    CreateEmbedFooter, User, UserId,
+};
+use poise::CreateReply;
 use rand::{seq::SliceRandom, thread_rng};
 use sqlx::error::DatabaseError;
 use sqlx::sqlite::SqliteError;
 use sqlx::{FromRow, QueryBuilder, Row, Sqlite, SqliteExecutor, SqlitePool};
-use std::borrow::Cow;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use tokio::sync::{RwLock, RwLockReadGuard};
 
+use crate::common::{embed_message, ephemeral_text_message, response};
 use crate::{
-    common::{avatar_url, ephemeral_message, name as get_name, pick_best_x_dice_rolls},
+    common::{avatar_url, ephemeral_reply, name as get_name, pick_best_x_dice_rolls},
     Context, Result, SUB_ROLE_ID,
 };
 
@@ -99,8 +103,9 @@ impl Timings {
         // At midnight the day after the last hatch
         let reset_time = last_hatch_date.and_hms_opt(0, 0, 0).unwrap() + chrono::Duration::days(1);
         // At midnight the day after this most recent attempt
-        let next_try =
-            (attempt.date().and_hms_opt(0, 0, 0).unwrap() + chrono::Duration::days(1)).timestamp();
+        let next_try = (attempt.date().and_hms_opt(0, 0, 0).unwrap() + chrono::Duration::days(1))
+            .and_utc()
+            .timestamp();
 
         Timings {
             attempt,
@@ -118,7 +123,7 @@ impl Timings {
         Timings {
             attempt,
             reset: time_until_next_slurp,
-            next_try: time_until_next_slurp.timestamp(),
+            next_try: time_until_next_slurp.and_utc().timestamp(),
             kind: UserAction::Slurp,
         }
     }
@@ -131,13 +136,13 @@ impl Timings {
         Timings {
             attempt,
             reset: time_until_next_gift,
-            next_try: time_until_next_gift.timestamp(),
+            next_try: time_until_next_gift.and_utc().timestamp(),
             kind: UserAction::Gift,
         }
     }
 
     fn ensure_outside_cooldown(&self) -> Result<()> {
-        if self.attempt > self.reset {
+        if self.attempt < self.reset {
             match self.kind {
                 UserAction::Hatch(_) => bail!(
                     "Dont be greedy! You can hatch again <t:{}:R>.",
@@ -186,7 +191,7 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     let user = DinoUser::new(author_id, Timings::hatch(&hatcher), hatcher);
 
     if let Err(e) = user.timings.ensure_outside_cooldown() {
-        ephemeral_message(ctx, e.to_string()).await?;
+        ctx.send(ephemeral_reply(e.to_string())).await?;
         return Ok(());
     }
 
@@ -197,10 +202,9 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
 
     let fragments = unwrap_fragments(ctx).await.read().await;
     let Some(parts) = generate_dino(db, &fragments).await? else {
-        ephemeral_message(
-            ctx,
+        ctx.send(ephemeral_reply(
             "I tried really hard but i wasn't able to make a unique dino for you. Sorry... :'(",
-        )
+        ))
         .await?;
         return Ok(());
     };
@@ -252,7 +256,7 @@ async fn collection(
             true => "You don't have any dinos :'(".to_string(),
             false => format!("{} doesn't have any dinos :'(", get_name(&ctx, user).await),
         };
-        ephemeral_message(ctx, content).await?;
+        ctx.send(ephemeral_reply(content)).await?;
         return Ok(());
     }
 
@@ -260,29 +264,24 @@ async fn collection(
     let author_name = get_name(&ctx, user).await;
     let filename = format!("{}_collection.png", user.name);
 
-    ctx.send(|message| {
-        message
-            .embed(|embed| {
-                embed
-                    .colour(0xffbf00)
-                    .author(|author| author.name(&author_name).icon_url(avatar_url(user)))
-                    .title(format!("{}'s collection", &author_name))
-                    .description(dino_collection.description())
-                    .footer(|f| {
-                        f.text(format!(
-                            "{}. They are worth: {} Bucks",
-                            dino_collection.count_as_string(),
-                            dino_collection.transaction_count
-                        ))
-                    })
-                    .attachment(&filename)
-            })
-            .attachment(AttachmentType::Bytes {
-                data: image.into(),
-                filename,
-            })
-            .ephemeral(silent)
-    })
+    let embed = CreateEmbed::default()
+        .colour(0xffbf00)
+        .author(CreateEmbedAuthor::new(&author_name).icon_url(avatar_url(user)))
+        .title(format!("{}'s collection", &author_name))
+        .description(dino_collection.description())
+        .footer(CreateEmbedFooter::new(format!(
+            "{}. They are worth: {} Bucks",
+            dino_collection.count_as_string(),
+            dino_collection.transaction_count
+        )))
+        .attachment(&filename);
+
+    ctx.send(
+        CreateReply::default()
+            .embed(embed)
+            .attachment(CreateAttachment::bytes(image, filename))
+            .ephemeral(silent),
+    )
     .await?;
 
     Ok(())
@@ -298,12 +297,18 @@ async fn rename(
     #[description = "The new name for your dino"] replacement: String,
 ) -> Result<()> {
     let Some(dino) = get_dino_record(&ctx.data().database, &name).await? else {
-        ephemeral_message(ctx, "The name of the dino you specified was not found.").await?;
+        ctx.send(ephemeral_reply(
+            "The name of the dino you specified was not found.",
+        ))
+        .await?;
         return Ok(());
     };
 
     if dino.owner_id != ctx.author().id.to_string().as_ref() {
-        ephemeral_message(ctx, "You don't own this dino, you can't rename it.").await?;
+        ctx.send(ephemeral_reply(
+            "You don't own this dino, you can't rename it.",
+        ))
+        .await?;
         return Ok(());
     }
 
@@ -312,20 +317,18 @@ async fn rename(
             // NOTE: 2067 is the code for a UNIQUE constraint error in Sqlite
             // https://www.sqlite.org/rescode.html#constraint_unique
             if sqlite_error.code() == Some("2067".into()) {
-                ephemeral_message(ctx, "This name is already taken!").await?;
+                ctx.send(ephemeral_reply("This name is already taken!"))
+                    .await?;
                 return Ok(());
             }
         };
         return Err(e);
     }
 
-    ephemeral_message(
-        ctx,
-        format!(
-            "**{}** name has been update to **{}**!",
-            dino.name, replacement
-        ),
-    )
+    ctx.send(ephemeral_reply(format!(
+        "**{}** name has been update to **{}**!",
+        dino.name, replacement
+    )))
     .await?;
 
     Ok(())
@@ -340,7 +343,10 @@ async fn view(
     name: String,
 ) -> Result<()> {
     let Some(dino) = get_dino_record(&ctx.data().database, &name).await? else {
-        ephemeral_message(ctx, "The name of the dino you specified was not found.").await?;
+        ctx.send(ephemeral_reply(
+            "The name of the dino you specified was not found.",
+        ))
+        .await?;
         return Ok(());
     };
 
@@ -383,17 +389,21 @@ async fn gift(
     let timings = Timings::gift(&user_record);
 
     if let Err(e) = timings.ensure_outside_cooldown() {
-        ephemeral_message(ctx, e.to_string()).await?;
+        ctx.send(ephemeral_reply(e.to_string())).await?;
         return Ok(());
     }
 
     let Some(dino_record) = get_dino_record(&ctx.data().database, &dino).await? else {
-        ephemeral_message(ctx, format!("Could not find a dino named {dino}.")).await?;
+        ctx.send(ephemeral_reply(format!(
+            "Could not find a dino named {dino}."
+        )))
+        .await?;
         return Ok(());
     };
 
     if dino_record.owner_id != ctx.author().id.to_string().as_ref() {
-        ephemeral_message(ctx, "You cannot gift a dino you don't own.").await?;
+        ctx.send(ephemeral_reply("You cannot gift a dino you don't own."))
+            .await?;
         return Ok(());
     }
 
@@ -417,14 +427,11 @@ async fn gift(
         format!("[{}]({})", dino, dino_record.hatch_message)
     };
 
-    ctx.send(|message| {
-        message.embed(|embed| {
-            embed.colour(0x990933).description(&format!(
-                "**{sender_name}** gifted {dino_name} to **{receiver_name}**! How kind!",
-            ))
-        })
-    })
-    .await?;
+    let embed = CreateEmbed::default().colour(0x990933).description(format!(
+        "**{sender_name}** gifted {dino_name} to **{receiver_name}**! How kind!",
+    ));
+
+    ctx.send(CreateReply::default().embed(embed)).await?;
 
     transaction.commit().await?;
 
@@ -443,7 +450,10 @@ async fn slurp(
     second: String,
 ) -> Result<()> {
     if first.trim() == second.trim() {
-        ephemeral_message(ctx, "You can't slurp the same dino twice, you cheater!").await?;
+        ctx.send(ephemeral_reply(
+            "You can't slurp the same dino twice, you cheater!",
+        ))
+        .await?;
         return Ok(());
     }
 
@@ -451,36 +461,40 @@ async fn slurp(
     let timings = Timings::slurp(&user_record);
 
     if let Err(e) = timings.ensure_outside_cooldown() {
-        ephemeral_message(ctx, e.to_string()).await?;
+        ctx.send(ephemeral_reply(e.to_string())).await?;
         return Ok(());
     }
 
     let Some(first_dino) = get_dino_record(&ctx.data().database, &first).await? else {
-        ephemeral_message(ctx, &format!("Could not find a dino named {first}.")).await?;
+        ctx.send(ephemeral_reply(&format!(
+            "Could not find a dino named {first}."
+        )))
+        .await?;
         return Ok(());
     };
 
     let author_id = ctx.author().id.to_string();
 
     if first_dino.owner_id != author_id {
-        ephemeral_message(
-            ctx,
-            &format!("Doesn't seem you own {first}, are you trying to pull a fast one on me?!"),
-        )
+        ctx.send(ephemeral_reply(&format!(
+            "Doesn't seem you own {first}, are you trying to pull a fast one on me?!"
+        )))
         .await?;
         return Ok(());
     }
 
     let Some(second_dino) = get_dino_record(&ctx.data().database, &second).await? else {
-        ephemeral_message(ctx, &format!("Could not find a dino named {second}.")).await?;
+        ctx.send(ephemeral_reply(&format!(
+            "Could not find a dino named {second}."
+        )))
+        .await?;
         return Ok(());
     };
 
     if second_dino.owner_id != author_id {
-        ephemeral_message(
-            ctx,
-            &format!("Doesn't seem you own {second}, are you trying to pull a fast one on me?!"),
-        )
+        ctx.send(ephemeral_reply(&format!(
+            "Doesn't seem you own {second}, are you trying to pull a fast one on me?!"
+        )))
         .await?;
         return Ok(());
     }
@@ -488,10 +502,9 @@ async fn slurp(
     let parts = generate_dino(&ctx.data().database, &fragments).await?;
 
     if parts.is_none() {
-        ephemeral_message(
-            ctx,
+        ctx.send(ephemeral_reply(
             "I tried really hard but i wasn't able to make a unique dino for you. Sorry... :'(",
-        )
+        ))
         .await?;
         return Ok(());
     }
@@ -532,7 +545,7 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
     let timings = Timings::slurp(&user_record);
 
     if let Err(e) = timings.ensure_outside_cooldown() {
-        ephemeral_message(ctx, e.to_string()).await?;
+        ctx.send(ephemeral_reply(e.to_string())).await?;
         return Ok(());
     }
 
@@ -540,7 +553,7 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
 
     if sacrifices.len() < 2 {
         let content = "You don't have enough trash dinos to slurp, the minimum is 2.";
-        ephemeral_message(ctx, content).await?;
+        ctx.send(ephemeral_reply(content)).await?;
         return Ok(());
     }
 
@@ -562,21 +575,19 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
         Are you SURE you want to do this?",
         num_to_sacrifice, num_to_create, dinos_at_risk
     );
-    let mut row = CreateActionRow::default();
-    row.create_button(|b| {
-        b.custom_id("slurpening-confirm")
-            .emoji('🔪')
-            .label("I AM 100% SURE".to_string())
-            .style(ButtonStyle::Danger)
-    });
+
+    let confirm_button = CreateButton::new("slurpening-confirm")
+        .emoji('🔪')
+        .label("I AM 100% SURE".to_string())
+        .style(ButtonStyle::Danger);
 
     let reply_handle = ctx
-        .send(|message| {
-            message
-                .components(|c| c.add_action_row(row))
+        .send(
+            CreateReply::default()
+                .components(vec![CreateActionRow::Buttons(vec![confirm_button])])
                 .content(content)
-                .ephemeral(true)
-        })
+                .ephemeral(true),
+        )
         .await?;
 
     while let Some(interaction) = reply_handle
@@ -584,7 +595,6 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
         .await?
         .await_component_interaction(ctx)
         .timeout(std::time::Duration::from_secs(10))
-        .collect_limit(1)
         .await
     {
         if interaction.data.custom_id != "slurpening-confirm" {
@@ -604,14 +614,12 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
         for _ in 0..num_to_create {
             let Some(parts) = generate_dino(&ctx.data().database, &fragments).await? else {
                 interaction
-                    .create_interaction_response(ctx, |response| {
-                        response.interaction_response_data(|data| {
-                            data.content(
-                                "Sorry but I couldn't generate a dino. Aborting slurpening.",
-                            )
-                            .ephemeral(true)
-                        })
-                    })
+                    .create_response(
+                        ctx,
+                        response(ephemeral_text_message(
+                            "Sorry but I couldn't generate a dino. Aborting slurpening.",
+                        )),
+                    )
                     .await?;
                 return Ok(());
             };
@@ -639,26 +647,18 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
             .map(|d| d.name.as_ref())
             .collect::<Vec<_>>()
             .join(", ");
+        let embed = CreateEmbed::default()
+            .colour(0xffbf00)
+            .author(CreateEmbedAuthor::new(&author_name).icon_url(author_avatar))
+            .title(format!("{}'s babies", &author_name))
+            .description(format!("{num_to_create} dinos came out: {new_dino_names}."))
+            .attachment(&filename);
 
         interaction
-            .create_interaction_response(ctx, |response| {
-                response.interaction_response_data(|data| {
-                    data.embed(|embed| {
-                        embed
-                            .colour(0xffbf00)
-                            .author(|a| a.name(&author_name).icon_url(author_avatar))
-                            .title(format!("{}'s babies", &author_name))
-                            .description(format!(
-                                "{num_to_create} dinos came out: {new_dino_names}."
-                            ))
-                            .attachment(&filename)
-                    })
-                    .add_file(AttachmentType::Bytes {
-                        data: Cow::Owned(image),
-                        filename,
-                    })
-                })
-            })
+            .create_response(
+                ctx,
+                response(embed_message(embed).add_file(CreateAttachment::bytes(image, filename))),
+            )
             .await?;
 
         update_last_user_action(&mut transaction, &user_id, UserAction::Slurp).await?;
@@ -668,11 +668,12 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
     }
 
     reply_handle
-        .edit(ctx, |message| {
-            message
-                .components(|c| c)
-                .content("Looks like you decided to hold off for now.")
-        })
+        .edit(
+            ctx,
+            CreateReply::default()
+                .components(Vec::new())
+                .content("Looks like you decided to hold off for now."),
+        )
         .await?;
     Ok(())
 }
@@ -871,6 +872,7 @@ fn generate_dino_collection_image(collection: &[DinoRecord]) -> Result<Vec<u8>> 
     Ok(bytes)
 }
 
+#[derive(Debug)]
 struct UserRecord {
     last_hatch: NaiveDateTime,
     last_slurp: NaiveDateTime,
@@ -1094,48 +1096,42 @@ async fn send_dino_embed(
     image_path: &Path,
     created_at: NaiveDateTime,
 ) -> Result<String> {
-    let mut row = CreateActionRow::default();
-    row.create_button(|b| {
-        b.custom_id(format!("{COVET_BUTTON}:{}", dino.id))
-            .emoji('👍')
-            .label("Covet".to_string())
-            .style(ButtonStyle::Success)
-    });
-    row.create_button(|b| {
-        b.custom_id(format!("{SHUN_BUTTON}:{}", dino.id))
-            .emoji('👎')
-            .label("Shun".to_string())
-            .style(ButtonStyle::Danger)
-    });
-    row.create_button(|b| {
-        b.custom_id(format!("{FAVOURITE_BUTTON}:{}", dino.id))
-            .emoji('🫶') // heart hands emoji
-            .label("Favourite".to_string())
-            .style(ButtonStyle::Secondary)
-    });
+    // let mut row = CreateActionRow::default();
+    let covet = CreateButton::new(format!("{COVET_BUTTON}:{}", dino.id))
+        .emoji('👍')
+        .label("Covet".to_string())
+        .style(ButtonStyle::Success);
+    let shun = CreateButton::new(format!("{SHUN_BUTTON}:{}", dino.id))
+        .emoji('👎')
+        .label("Shun".to_string())
+        .style(ButtonStyle::Danger);
+    let favourite = CreateButton::new(format!("{FAVOURITE_BUTTON}:{}", dino.id))
+        .emoji('🫶') // heart hands emoji
+        .label("Favourite".to_string())
+        .style(ButtonStyle::Secondary);
 
     let image_name = get_file_name(image_path);
+    let embed = CreateEmbed::default()
+        .colour(0x66ff99)
+        .author(CreateEmbedAuthor::new(owner_name).icon_url(owner_avatar))
+        .title(&dino.name)
+        .description(format!(
+            "**Created:** <t:{}>",
+            created_at.and_utc().timestamp()
+        ))
+        .footer(CreateEmbedFooter::new(format!(
+            "{} is worth {} Dino Bucks!\nHotness Rating: {}",
+            &dino.name, dino.worth, dino.hotness
+        )))
+        .attachment(image_name);
 
     let reply_handle = ctx
-        .send(|message| {
-            message
-                .components(|c| c.add_action_row(row))
-                .attachment(AttachmentType::Path(image_path))
-                .embed(|embed| {
-                    embed
-                        .colour(0x66ff99)
-                        .author(|author| author.name(owner_name).icon_url(owner_avatar))
-                        .title(&dino.name)
-                        .description(format!("**Created:** <t:{}>", created_at.timestamp()))
-                        .footer(|f| {
-                            f.text(format!(
-                                "{} is worth {} Dino Bucks!\nHotness Rating: {}",
-                                &dino.name, dino.worth, dino.hotness
-                            ))
-                        })
-                        .attachment(image_name)
-                })
-        })
+        .send(
+            CreateReply::default()
+                .components(vec![CreateActionRow::Buttons(vec![covet, shun, favourite])])
+                .attachment(CreateAttachment::path(image_path).await?)
+                .embed(embed),
+        )
         .await?;
 
     let message_link = reply_handle.message().await?.link();

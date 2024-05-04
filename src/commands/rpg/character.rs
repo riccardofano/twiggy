@@ -107,16 +107,15 @@ impl Character {
         self.stats[stat] / 2 - 5
     }
 
-    pub fn to_embed<'b>(&self, builder: &'b mut CreateEmbed) -> &'b mut CreateEmbed {
-        builder
+    pub fn to_embed(&self) -> CreateEmbed {
+        CreateEmbed::default()
             .color(0x0099333)
             .title(&self.name)
             .description(format!(
                 "{info}\n```{stats}```",
                 info = self.display_info(),
                 stats = self.display_stats()
-            ));
-        builder
+            ))
     }
 
     fn display_info(&self) -> String {

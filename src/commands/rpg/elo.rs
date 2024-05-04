@@ -40,6 +40,12 @@ impl LadderPosition {
     }
 }
 
+impl From<LadderPosition> for String {
+    fn from(val: LadderPosition) -> Self {
+        val.to_string()
+    }
+}
+
 impl Display for LadderPosition {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
