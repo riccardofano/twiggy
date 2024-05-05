@@ -207,7 +207,6 @@ async fn register_guild_commands(
             continue;
         };
 
-        // HACK: I could not find a way create commands by name
         let commands = names
             .iter()
             .map(|(name, _content)| CreateCommand::new(name).description("A simple text command"))
