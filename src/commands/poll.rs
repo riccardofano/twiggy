@@ -24,7 +24,7 @@ type CustomData = Mutex<Option<Poll>>;
 #[poise::command(
     guild_only,
     slash_command,
-    subcommands("new", "add_choice"),
+    subcommands("new", "close", "choice"),
     custom_data = "CustomData::default()"
 )]
 pub async fn poll(_ctx: Context<'_>) -> Result<()> {
@@ -37,6 +37,13 @@ async fn new(
     #[description = "What you want to ask"] question: String,
 ) -> Result<()> {
     let custom_data = unwrap_custom_data(ctx);
+    let mut poll = custom_data.lock().await;
+
+    if (*poll).is_some() {
+        let msg = "There's a poll running already. Close it before creating a new one.";
+        ctx.send(ephemeral_reply(msg)).await?;
+        return Ok(());
+    }
 
     let embed = CreateEmbed::new()
         .title(&question)
@@ -44,7 +51,6 @@ async fn new(
     let msg = ctx.send(CreateReply::default().embed(embed)).await?;
     let message_id = msg.into_message().await?.id;
 
-    let mut poll = custom_data.lock().await;
     *poll = Some(Poll {
         message_id,
         question,
@@ -55,7 +61,7 @@ async fn new(
 }
 
 #[poise::command(guild_only, slash_command)]
-async fn add_choice(
+async fn choice(
     ctx: Context<'_>,
     #[description = "The choice you want to add to the poll"]
     #[max_length = 25]
@@ -97,6 +103,24 @@ async fn add_choice(
         message.react(ctx, ReactionType::Unicode(icon.to_string())),
         ctx.send(ephemeral_reply("Choice added."))
     )?;
+
+    Ok(())
+}
+
+#[poise::command(guild_only, slash_command)]
+async fn close(ctx: Context<'_>) -> Result<()> {
+    let custom_data = unwrap_custom_data(ctx);
+    let mut poll = custom_data.lock().await;
+
+    let response = match *poll {
+        None => "There's no poll to close",
+        Some(_) => {
+            *poll = None;
+            "The poll has been closed."
+        }
+    };
+
+    ctx.send(ephemeral_reply(response)).await?;
 
     Ok(())
 }
