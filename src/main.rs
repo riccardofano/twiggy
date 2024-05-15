@@ -10,6 +10,7 @@ use commands::*;
 use common::{response, text_message};
 use lru::LruCache;
 use poise::serenity_prelude::{self as serenity, CreateCommand, FullEvent};
+use poise::Command;
 use tokio::sync::{Mutex, RwLock};
 
 pub struct Data {
@@ -45,22 +46,23 @@ async fn main() {
         .await
         .expect("Expected to be able to connect to the database");
 
-    let commands = vec![
-        rpg(),
-        eightball(),
+    let commands: Vec<Command<Data, Error>> = vec![
+        poll(),
+        ask(),
+        bestmixu(),
+        color(),
+        commands(),
+        dino(),
         duel(),
         duelstats(),
-        dino(),
-        color(),
-        uncolor(),
-        sudoku(),
-        quote(),
-        mixu(),
-        bestmixu(),
+        eightball(),
         mikustare(),
+        mixu(),
+        quote(),
+        rpg(),
         rps(),
-        ask(),
-        commands(),
+        sudoku(),
+        uncolor(),
     ];
 
     DEFAULT_COMMANDS.get_or_init(|| commands.iter().map(|c| c.name.clone()).collect::<Vec<_>>());
@@ -95,6 +97,7 @@ async fn main() {
         .options(options)
         .setup(|ctx, _ready, framework| {
             Box::pin(async move {
+                // poise::builtins::register_globally(ctx, Vec::new()).await?;
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                 Ok(user_data)
             })
