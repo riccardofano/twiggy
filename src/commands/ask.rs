@@ -4,7 +4,9 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use anyhow::bail;
 use chrono::Utc;
+use poise::CreateReply;
 use reqwest::{StatusCode, Url};
+use serenity::all::CreateEmbed;
 
 const UNIT_STR: [&str; 2] = ["imperial", "metric"];
 
@@ -41,8 +43,11 @@ pub async fn ask(
         return Ok(());
     };
 
-    // TODO: Escape markdown
-    ctx.say(format!("**{question}**\n> {answer}")).await?;
+    let embed = CreateEmbed::default()
+        .title(question)
+        .description(answer)
+        .color(0xFBAB00);
+    ctx.send(CreateReply::default().embed(embed)).await?;
 
     Ok(())
 }
