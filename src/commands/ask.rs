@@ -6,52 +6,56 @@ use anyhow::bail;
 use chrono::Utc;
 use reqwest::{StatusCode, Url};
 
+const UNIT_STR: [&str; 2] = ["imperial", "metric"];
+
+#[derive(poise::ChoiceParameter)]
+pub enum Unit {
+    Imperial,
+    Metric,
+}
+
 // This looks dumb but it tells me that I'm using seconds
 // instead of just being a random number
-const ASK_COOLDOWN: i64 = std::time::Duration::from_secs(600).as_secs() as i64;
+const ASK_COOLDOWN: i64 = std::time::Duration::from_secs(10).as_secs() as i64;
 
 /// Ask a question to Wolfram Alpha
 #[poise::command(slash_command, prefix_command, custom_data = "AtomicI64::new(0)")]
 pub async fn ask(
     ctx: Context<'_>,
     #[description = "The question you want to ask"] question: String,
+    #[description = "The units of measurement"] units: Option<Unit>,
 ) -> Result<()> {
-    let last_called = ctx
-        .command()
-        .custom_data
-        .downcast_ref::<AtomicI64>()
-        .expect("Expected the command to have the last use timestamp");
-
-    let now = Utc::now().timestamp();
-    if last_called.load(Ordering::Relaxed) + ASK_COOLDOWN > now {
-        ctx.send(ephemeral_reply("The ask command is on cooldown."))
-            .await?;
-        return Ok(());
-    }
-
     let Ok(wolfram_app_id) = std::env::var("WOLFRAM_APP_ID") else {
         let msg = "The `ask` command does not work without a Wolfram App ID.";
         ctx.say(msg).await?;
         return Ok(());
     };
 
-    // Update cooldown
-    last_called.store(now, Ordering::Relaxed);
+    if let Err(cooldown_msg) = update_cooldown(ctx).await {
+        ctx.send(ephemeral_reply(cooldown_msg.to_string())).await?;
+        return Ok(());
+    }
 
-    let Some(answer) = fetch_answer(&question, &wolfram_app_id).await? else {
+    let Some(answer) = fetch_answer(&wolfram_app_id, &question, units).await? else {
         ctx.say("The bot was not able to answer").await?;
         return Ok(());
     };
 
-    ctx.say(format!("[{question}] {answer}")).await?;
+    // TODO: Escape markdown
+    ctx.say(format!("**{question}**\n> {answer}")).await?;
 
     Ok(())
 }
 
-async fn fetch_answer(question: &str, app_id: &str) -> Result<Option<String>> {
+async fn fetch_answer(app_id: &str, question: &str, units: Option<Unit>) -> Result<Option<String>> {
+    let unit = units.unwrap_or(Unit::Metric);
     let url = Url::parse_with_params(
         "https://api.wolframalpha.com/v1/result",
-        &[("appid", app_id), ("i", question), ("units", "metric")],
+        &[
+            ("appid", app_id),
+            ("i", question),
+            ("units", UNIT_STR[unit as usize]),
+        ],
     )?;
     let response = reqwest::get(url).await?;
 
@@ -62,6 +66,23 @@ async fn fetch_answer(question: &str, app_id: &str) -> Result<Option<String>> {
         }
         StatusCode::NOT_IMPLEMENTED => Ok(None),
         StatusCode::BAD_REQUEST => bail!("Wolfram Alpha parameters were not set correctly"),
-        s => bail!("Something went wrong. Status: {s}"),
+        _ => bail!("Something went wrong. Response: {response:?}"),
     }
+}
+
+async fn update_cooldown(ctx: Context<'_>) -> Result<()> {
+    let last_called = ctx
+        .command()
+        .custom_data
+        .downcast_ref::<AtomicI64>()
+        .expect("Expected the command to have the last use timestamp");
+
+    let now = Utc::now().timestamp();
+    let cooldown_end = last_called.load(Ordering::Relaxed) + ASK_COOLDOWN;
+    if cooldown_end > now {
+        bail!("The command will be off cooldown <t:{cooldown_end}:R>");
+    }
+
+    last_called.store(now, Ordering::Relaxed);
+    Ok(())
 }
