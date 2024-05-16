@@ -38,14 +38,13 @@ pub async fn ask(
         return Ok(());
     }
 
-    let Some(answer) = fetch_answer(&wolfram_app_id, &question, units).await? else {
-        ctx.say("The bot was not able to answer").await?;
-        return Ok(());
-    };
+    let answer = fetch_answer(&wolfram_app_id, &question, units)
+        .await?
+        .unwrap_or_else(|| "The bot was not able to answer".to_owned());
 
     let embed = CreateEmbed::default()
-        .title(question)
-        .description(answer)
+        .title(truncate(question, 256))
+        .description(truncate(answer, 4096))
         .color(0xFBAB00);
     ctx.send(CreateReply::default().embed(embed)).await?;
 
@@ -90,4 +89,12 @@ async fn update_cooldown(ctx: Context<'_>) -> Result<()> {
 
     last_called.store(now, Ordering::Relaxed);
     Ok(())
+}
+
+fn truncate(string: String, max_length: usize) -> String {
+    if string.len() <= max_length {
+        return string;
+    }
+
+    format!("{}...", &string[..max_length - 3])
 }
