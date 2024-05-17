@@ -16,8 +16,7 @@ pub async fn sudoku(
         .expect("Expected /sudoku to be guild only.");
 
     if ctx.author().id == guild.owner_id {
-        let msg = "Sadly I cannot time out the owner of the server.";
-        return bail_reply(ctx, msg).await;
+        return bail_reply(ctx, "Sadly I cannot time out the owner of the server.").await;
     }
 
     let Some(mut member) = ctx.author_member().await else {

@@ -148,13 +148,11 @@ async fn choice(
     };
 
     let Ok(mut message) = ctx.channel_id().message(ctx, poll.message_id).await else {
-        let msg = "Couldn't find the poll in this channel";
-        return bail_reply(ctx, msg).await;
+        return bail_reply(ctx, "Couldn't find the poll in this channel").await;
     };
 
     let Some(icon) = poll.available_icons.pop() else {
-        let msg = "Sorry buddy but there are enough options already.";
-        return bail_reply(ctx, msg).await;
+        return bail_reply(ctx, "Sorry buddy but there are enough options already.").await;
     };
 
     poll.choices.push(Choice {
@@ -184,13 +182,11 @@ async fn whoops(
     let mut poll = custom_data.lock().await;
 
     let Some(poll) = &mut *poll else {
-        let msg = "There's no poll available my guy.";
-        return bail_reply(ctx, msg).await;
+        return bail_reply(ctx, "There's no poll available my guy.").await;
     };
 
     let Ok(mut message) = ctx.channel_id().message(ctx, poll.message_id).await else {
-        let msg = "Couldn't find the poll in this channel.";
-        return bail_reply(ctx, msg).await;
+        return bail_reply(ctx, "Couldn't find the poll in this channel.").await;
     };
 
     let choice = choice.to_lowercase();

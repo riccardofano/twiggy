@@ -298,8 +298,7 @@ async fn rename(
     };
 
     if dino.owner_id != ctx.author().id.to_string().as_ref() {
-        let msg = "You don't own this dino, you can't rename it.";
-        return bail_reply(ctx, msg).await;
+        return bail_reply(ctx, "You don't own this dino, you can't rename it.").await;
     }
 
     if let Err(e) = update_dino_name(&ctx.data().database, dino.id, &replacement).await {
@@ -439,8 +438,7 @@ async fn slurp(
     }
 
     let Some(first_dino) = get_dino_record(&ctx.data().database, &first).await? else {
-        let msg = format!("Could not find a dino named {first}.");
-        return bail_reply(ctx, msg).await;
+        return bail_reply(ctx, format!("Could not find a dino named {first}.")).await;
     };
 
     let author_id = ctx.author().id.to_string();
