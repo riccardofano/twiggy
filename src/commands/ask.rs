@@ -38,9 +38,7 @@ pub async fn ask(
         return Ok(());
     }
 
-    let answer = fetch_answer(&wolfram_app_id, &question, units)
-        .await?
-        .unwrap_or_else(|| "The bot was not able to answer".to_owned());
+    let answer = fetch_answer(&wolfram_app_id, &question, units).await?;
 
     let embed = CreateEmbed::default()
         .title(truncate(question, 256))
@@ -51,7 +49,7 @@ pub async fn ask(
     Ok(())
 }
 
-async fn fetch_answer(app_id: &str, question: &str, units: Option<Unit>) -> Result<Option<String>> {
+async fn fetch_answer(app_id: &str, question: &str, units: Option<Unit>) -> Result<String> {
     let unit = units.unwrap_or(Unit::Metric);
     let url = Url::parse_with_params(
         "https://api.wolframalpha.com/v1/result",
@@ -61,14 +59,11 @@ async fn fetch_answer(app_id: &str, question: &str, units: Option<Unit>) -> Resu
             ("units", UNIT_STR[unit as usize]),
         ],
     )?;
-    let response = reqwest::get(url).await?;
 
+    let response = reqwest::get(url).await?;
     match response.status() {
-        StatusCode::OK => {
-            let answer = response.text().await?;
-            Ok(Some(answer))
-        }
-        StatusCode::NOT_IMPLEMENTED => Ok(None),
+        StatusCode::OK => Ok(response.text().await?),
+        StatusCode::NOT_IMPLEMENTED => Ok("The bot was not able to answer.".to_owned()),
         StatusCode::BAD_REQUEST => bail!("Wolfram Alpha parameters were not set correctly"),
         _ => bail!("Something went wrong. Response: {response:?}"),
     }
