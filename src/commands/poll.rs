@@ -152,7 +152,12 @@ async fn whoops(
         return Ok(());
     };
 
-    let Some(position) = poll.choices.iter().position(|c| c.text == choice) else {
+    let choice = choice.to_lowercase();
+    let Some(position) = poll
+        .choices
+        .iter()
+        .position(|c| c.text.to_lowercase() == choice)
+    else {
         ctx.send(ephemeral_reply("I couldn't find the choice."))
             .await?;
         return Ok(());
