@@ -2,8 +2,8 @@ use crate::common::ephemeral_reply;
 use crate::{Context, Result};
 
 use poise::serenity_prelude::MessageId;
-use poise::CreateReply;
-use serenity::all::{CreateEmbed, EditMessage, ReactionType};
+use poise::{ChoiceParameter, CreateReply};
+use serenity::all::{CreateEmbed, EditMessage, Message, ReactionType};
 use tokio::sync::Mutex;
 
 const ICONS_LEN: usize = 20;
@@ -38,7 +38,7 @@ pub async fn poll(_ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
-#[poise::command(guild_only, slash_command)]
+#[poise::command(guild_only, slash_command, required_permissions = "MANAGE_MESSAGES")]
 async fn new(
     ctx: Context<'_>,
     #[description = "What you want to ask"] question: String,
@@ -68,22 +68,72 @@ async fn new(
     Ok(())
 }
 
-#[poise::command(guild_only, slash_command)]
-async fn close(ctx: Context<'_>) -> Result<()> {
+#[derive(ChoiceParameter)]
+enum CloseKind {
+    Announce,
+    Silent,
+}
+
+#[poise::command(guild_only, slash_command, required_permissions = "MANAGE_MESSAGES")]
+async fn close(
+    ctx: Context<'_>,
+    #[description = "Whether to announce the winner or not"] kind: Option<CloseKind>,
+) -> Result<()> {
     let custom_data = unwrap_custom_data(ctx);
     let mut poll = custom_data.lock().await;
 
-    let response = match *poll {
-        None => "There's no poll to close",
-        Some(_) => {
-            *poll = None;
-            "The poll has been closed."
+    let Some(found_poll) = &mut *poll else {
+        ctx.send(ephemeral_reply("There's no poll to close"))
+            .await?;
+        return Ok(());
+    };
+
+    let kind = kind.unwrap_or(CloseKind::Silent);
+    let reply = match kind {
+        CloseKind::Silent => ephemeral_reply("The poll has been closed!"),
+        CloseKind::Announce => {
+            let Ok(message) = ctx.channel_id().message(ctx, found_poll.message_id).await else {
+                let msg = "This channel is not the same as the one with the poll.";
+                ctx.send(ephemeral_reply(msg)).await?;
+                return Ok(());
+            };
+            announce_winner(found_poll, message).await
         }
     };
 
-    ctx.send(ephemeral_reply(response)).await?;
+    *poll = None;
+    ctx.send(reply).await?;
 
     Ok(())
+}
+
+async fn announce_winner(poll: &Poll, message: Message) -> CreateReply {
+    let Some(reaction) = message
+        .reactions
+        .iter()
+        .filter(|r| r.me)
+        .max_by(|a, b| a.count.cmp(&b.count))
+    else {
+        return ephemeral_reply("There were no choices for this poll, I closed it now though.");
+    };
+
+    let reaction_str = reaction.reaction_type.to_string();
+    let choice = poll
+        .choices
+        .iter()
+        .find(|c| c.icon == reaction_str)
+        .expect("Expected a reaction sent by the bot to be in the poll in memory.");
+
+    let embed = CreateEmbed::default()
+        .title(format!("{} winner:", poll.question))
+        .description(format!(
+            "{} {} with {} votes!",
+            choice.icon,
+            choice.text,
+            reaction.count - 1
+        ));
+
+    CreateReply::default().embed(embed)
 }
 
 #[poise::command(guild_only, slash_command)]
