@@ -44,6 +44,11 @@ pub fn reply_with_buttons(content: impl Into<String>, rows: Vec<CreateActionRow>
     CreateReply::default().content(content).components(rows)
 }
 
+pub async fn bail_reply(ctx: Context<'_>, content: impl Into<String>) -> anyhow::Result<()> {
+    ctx.send(ephemeral_reply(content)).await?;
+    Ok(())
+}
+
 pub async fn nickname(ctx: &Context<'_>, person: &User) -> Option<String> {
     let guild_id = ctx.guild_id()?;
     person.nick_in(ctx, guild_id).await

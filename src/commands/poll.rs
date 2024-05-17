@@ -1,4 +1,4 @@
-use crate::common::ephemeral_reply;
+use crate::common::{bail_reply, ephemeral_reply};
 use crate::{Context, Result};
 
 use poise::serenity_prelude::MessageId;
@@ -48,8 +48,7 @@ async fn new(
 
     if (*poll).is_some() {
         let msg = "There's a poll running already. Close it before creating a new one.";
-        ctx.send(ephemeral_reply(msg)).await?;
-        return Ok(());
+        return bail_reply(ctx, msg).await;
     }
 
     let embed = CreateEmbed::new()
@@ -83,9 +82,7 @@ async fn close(
     let mut poll = custom_data.lock().await;
 
     let Some(found_poll) = &mut *poll else {
-        ctx.send(ephemeral_reply("There's no poll to close"))
-            .await?;
-        return Ok(());
+        return bail_reply(ctx, "There's no poll to close").await;
     };
 
     let kind = kind.unwrap_or(CloseKind::Silent);
@@ -94,8 +91,7 @@ async fn close(
         CloseKind::Announce => {
             let Ok(message) = ctx.channel_id().message(ctx, found_poll.message_id).await else {
                 let msg = "This channel is not the same as the one with the poll.";
-                ctx.send(ephemeral_reply(msg)).await?;
-                return Ok(());
+                return bail_reply(ctx, msg).await;
             };
             announce_winner(found_poll, message).await
         }
@@ -147,21 +143,16 @@ async fn choice(
     let mut poll = custom_data.lock().await;
 
     let Some(poll) = &mut *poll else {
-        let msg = ephemeral_reply("There's no poll running, create one with /poll new <question>");
-        ctx.send(msg).await?;
-        return Ok(());
+        let msg = "There's no poll running, create one with /poll new <question>";
+        return bail_reply(ctx, msg).await;
     };
 
     let Ok(mut message) = ctx.channel_id().message(ctx, poll.message_id).await else {
-        let msg = ephemeral_reply("Couldn't find the poll in this channel");
-        ctx.send(msg).await?;
-        return Ok(());
+        return bail_reply(ctx, "Couldn't find the poll in this channel").await;
     };
 
     let Some(icon) = poll.available_icons.pop() else {
-        let msg = ephemeral_reply("Sorry buddy but there are enough options already.");
-        ctx.send(msg).await?;
-        return Ok(());
+        return bail_reply(ctx, "Sorry buddy but there are enough options already.").await;
     };
 
     poll.choices.push(Choice {
@@ -191,15 +182,11 @@ async fn whoops(
     let mut poll = custom_data.lock().await;
 
     let Some(poll) = &mut *poll else {
-        let msg = ephemeral_reply("There's no poll available my guy.");
-        ctx.send(msg).await?;
-        return Ok(());
+        return bail_reply(ctx, "There's no poll available my guy.").await;
     };
 
     let Ok(mut message) = ctx.channel_id().message(ctx, poll.message_id).await else {
-        let msg = ephemeral_reply("Couldn't find the poll in this channel.");
-        ctx.send(msg).await?;
-        return Ok(());
+        return bail_reply(ctx, "Couldn't find the poll in this channel.").await;
     };
 
     let choice = choice.to_lowercase();
@@ -208,15 +195,11 @@ async fn whoops(
         .iter()
         .position(|c| c.text.to_lowercase() == choice)
     else {
-        ctx.send(ephemeral_reply("I couldn't find the choice."))
-            .await?;
-        return Ok(());
+        return bail_reply(ctx, "I couldn't find the choice.").await;
     };
 
     if poll.choices[position].owner != ctx.author().id.get() {
-        ctx.send(ephemeral_reply("That wasn't a choice you submitted."))
-            .await?;
-        return Ok(());
+        return bail_reply(ctx, "That wasn't a choice you submitted.").await;
     }
 
     let choice = poll.choices.remove(position);

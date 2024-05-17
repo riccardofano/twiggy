@@ -1,5 +1,5 @@
 use crate::common::{
-    avatar_url, colour, ephemeral_reply, name, reply_with_buttons, response, text_message,
+    avatar_url, bail_reply, colour, name, reply_with_buttons, response, text_message,
     update_response, Score,
 };
 use crate::Context;
@@ -39,14 +39,11 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
     let custom_data_lock = unwrap_duel_data(ctx);
 
     if custom_data_lock.read().await.in_progress {
-        ctx.send(ephemeral_reply("A duel is already in progress"))
-            .await?;
-        return Ok(());
+        return bail_reply(ctx, "A duel is already in progress").await;
     }
 
     if let Err(e) = challenger.ensure_outside_cooldown(ctx).await {
-        ctx.send(ephemeral_reply(e.to_string())).await?;
-        return Ok(());
+        return bail_reply(ctx, e.to_string()).await;
     }
 
     let initial_msg = format!("{challenger} is looking for a duel, press the button to accept.",);
@@ -153,9 +150,7 @@ pub async fn duelstats(ctx: Context<'_>) -> Result<()> {
     let conn = &mut ctx.data().database.acquire().await?;
 
     let Some(stats) = get_duel_stats(conn, user.id.to_string()).await? else {
-        ctx.send(ephemeral_reply("You have never dueled before."))
-            .await?;
-        return Ok(());
+        return bail_reply(ctx, "You have never dueled before.").await;
     };
 
     let name = name(&ctx, user).await;

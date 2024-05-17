@@ -1,7 +1,7 @@
 use chrono::{Duration, Utc};
 use rand::Rng;
 
-use crate::common::{ephemeral_reply, name};
+use crate::common::{bail_reply, name};
 use crate::{Context, Result};
 
 /// Commit sudoku
@@ -16,17 +16,11 @@ pub async fn sudoku(
         .expect("Expected /sudoku to be guild only.");
 
     if ctx.author().id == guild.owner_id {
-        ctx.send(ephemeral_reply(
-            "Sadly I cannot time out the owner of the server.",
-        ))
-        .await?;
-        return Ok(());
+        return bail_reply(ctx, "Sadly I cannot time out the owner of the server.").await;
     }
 
     let Some(mut member) = ctx.author_member().await else {
-        ctx.send(ephemeral_reply("Could not get your member details."))
-            .await?;
-        return Ok(());
+        return bail_reply(ctx, "Could not get your member details.").await;
     };
 
     let random_timeout = {

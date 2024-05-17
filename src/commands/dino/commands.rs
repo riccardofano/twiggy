@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use tokio::sync::{RwLock, RwLockReadGuard};
 
-use crate::common::{embed_message, ephemeral_text_message, response};
+use crate::common::{bail_reply, embed_message, ephemeral_text_message, response};
 use crate::{
     common::{avatar_url, ephemeral_reply, name as get_name, pick_best_x_dice_rolls},
     Context, Result, SUB_ROLE_ID,
@@ -191,8 +191,7 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
     let user = DinoUser::new(author_id, Timings::hatch(&hatcher), hatcher);
 
     if let Err(e) = user.timings.ensure_outside_cooldown() {
-        ctx.send(ephemeral_reply(e.to_string())).await?;
-        return Ok(());
+        return bail_reply(ctx, e.to_string()).await;
     }
 
     if let Err(e) = try_hatching(db, ctx, &user).await {
@@ -202,11 +201,9 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
 
     let fragments = unwrap_fragments(ctx).await.read().await;
     let Some(parts) = generate_dino(db, &fragments).await? else {
-        ctx.send(ephemeral_reply(
-            "I tried really hard but i wasn't able to make a unique dino for you. Sorry... :'(",
-        ))
-        .await?;
-        return Ok(());
+        let msg =
+            "I tried really hard but i wasn't able to make a unique dino for you. Sorry... :'(";
+        return bail_reply(ctx, msg).await;
     };
 
     let image_path = generate_dino_image(&parts)?;
@@ -256,8 +253,7 @@ async fn collection(
             true => "You don't have any dinos :'(".to_string(),
             false => format!("{} doesn't have any dinos :'(", get_name(&ctx, user).await),
         };
-        ctx.send(ephemeral_reply(content)).await?;
-        return Ok(());
+        return bail_reply(ctx, content).await;
     }
 
     let image = generate_dino_collection_image(&dino_collection.dinos)?;
@@ -297,19 +293,12 @@ async fn rename(
     #[description = "The new name for your dino"] replacement: String,
 ) -> Result<()> {
     let Some(dino) = get_dino_record(&ctx.data().database, &name).await? else {
-        ctx.send(ephemeral_reply(
-            "The name of the dino you specified was not found.",
-        ))
-        .await?;
-        return Ok(());
+        let msg = "The name of the dino you specified was not found.";
+        return bail_reply(ctx, msg).await;
     };
 
     if dino.owner_id != ctx.author().id.to_string().as_ref() {
-        ctx.send(ephemeral_reply(
-            "You don't own this dino, you can't rename it.",
-        ))
-        .await?;
-        return Ok(());
+        return bail_reply(ctx, "You don't own this dino, you can't rename it.").await;
     }
 
     if let Err(e) = update_dino_name(&ctx.data().database, dino.id, &replacement).await {
@@ -317,9 +306,7 @@ async fn rename(
             // NOTE: 2067 is the code for a UNIQUE constraint error in Sqlite
             // https://www.sqlite.org/rescode.html#constraint_unique
             if sqlite_error.code() == Some("2067".into()) {
-                ctx.send(ephemeral_reply("This name is already taken!"))
-                    .await?;
-                return Ok(());
+                return bail_reply(ctx, "This name is already taken!").await;
             }
         };
         return Err(e);
@@ -343,11 +330,8 @@ async fn view(
     name: String,
 ) -> Result<()> {
     let Some(dino) = get_dino_record(&ctx.data().database, &name).await? else {
-        ctx.send(ephemeral_reply(
-            "The name of the dino you specified was not found.",
-        ))
-        .await?;
-        return Ok(());
+        let msg = "The name of the dino you specified was not found.";
+        return bail_reply(ctx, msg).await;
     };
 
     let owner_user_id = UserId::from_str(&dino.owner_id)?;
@@ -389,22 +373,15 @@ async fn gift(
     let timings = Timings::gift(&user_record);
 
     if let Err(e) = timings.ensure_outside_cooldown() {
-        ctx.send(ephemeral_reply(e.to_string())).await?;
-        return Ok(());
+        return bail_reply(ctx, e.to_string()).await;
     }
 
     let Some(dino_record) = get_dino_record(&ctx.data().database, &dino).await? else {
-        ctx.send(ephemeral_reply(format!(
-            "Could not find a dino named {dino}."
-        )))
-        .await?;
-        return Ok(());
+        return bail_reply(ctx, "Could not find a dino named {dino}.").await;
     };
 
     if dino_record.owner_id != ctx.author().id.to_string().as_ref() {
-        ctx.send(ephemeral_reply("You cannot gift a dino you don't own."))
-            .await?;
-        return Ok(());
+        return bail_reply(ctx, "You cannot gift a dino you don't own.").await;
     }
 
     let mut transaction = ctx.data().database.begin().await?;
@@ -450,63 +427,44 @@ async fn slurp(
     second: String,
 ) -> Result<()> {
     if first.trim() == second.trim() {
-        ctx.send(ephemeral_reply(
-            "You can't slurp the same dino twice, you cheater!",
-        ))
-        .await?;
-        return Ok(());
+        return bail_reply(ctx, "You can't slurp the same dino twice, you cheater!").await;
     }
 
     let user_record = get_user_record(&ctx.data().database, &ctx.author().id.to_string()).await?;
     let timings = Timings::slurp(&user_record);
 
     if let Err(e) = timings.ensure_outside_cooldown() {
-        ctx.send(ephemeral_reply(e.to_string())).await?;
-        return Ok(());
+        return bail_reply(ctx, e.to_string()).await;
     }
 
     let Some(first_dino) = get_dino_record(&ctx.data().database, &first).await? else {
-        ctx.send(ephemeral_reply(&format!(
-            "Could not find a dino named {first}."
-        )))
-        .await?;
-        return Ok(());
+        return bail_reply(ctx, format!("Could not find a dino named {first}.")).await;
     };
 
     let author_id = ctx.author().id.to_string();
 
     if first_dino.owner_id != author_id {
-        ctx.send(ephemeral_reply(&format!(
-            "Doesn't seem you own {first}, are you trying to pull a fast one on me?!"
-        )))
-        .await?;
-        return Ok(());
+        let msg =
+            format!("Doesn't seem you own {first}, are you trying to pull a fast one on me?!");
+        return bail_reply(ctx, msg).await;
     }
 
     let Some(second_dino) = get_dino_record(&ctx.data().database, &second).await? else {
-        ctx.send(ephemeral_reply(&format!(
-            "Could not find a dino named {second}."
-        )))
-        .await?;
-        return Ok(());
+        return bail_reply(ctx, format!("Could not find a dino named {second}.")).await;
     };
 
     if second_dino.owner_id != author_id {
-        ctx.send(ephemeral_reply(&format!(
-            "Doesn't seem you own {second}, are you trying to pull a fast one on me?!"
-        )))
-        .await?;
-        return Ok(());
+        let msg =
+            format!("Doesn't seem you own {second}, are you trying to pull a fast one on me?!");
+        return bail_reply(ctx, msg).await;
     }
     let fragments = unwrap_fragments(ctx).await.read().await;
     let parts = generate_dino(&ctx.data().database, &fragments).await?;
 
     if parts.is_none() {
-        ctx.send(ephemeral_reply(
-            "I tried really hard but i wasn't able to make a unique dino for you. Sorry... :'(",
-        ))
-        .await?;
-        return Ok(());
+        let msg =
+            "I tried really hard but i wasn't able to make a unique dino for you. Sorry... :'(";
+        return bail_reply(ctx, msg).await;
     }
 
     let mut transaction = ctx.data().database.begin().await?;
@@ -545,16 +503,14 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
     let timings = Timings::slurp(&user_record);
 
     if let Err(e) = timings.ensure_outside_cooldown() {
-        ctx.send(ephemeral_reply(e.to_string())).await?;
-        return Ok(());
+        return bail_reply(ctx, e.to_string()).await;
     }
 
     let mut sacrifices = get_non_favourites(&ctx.data().database, &user_id).await?;
 
     if sacrifices.len() < 2 {
-        let content = "You don't have enough trash dinos to slurp, the minimum is 2.";
-        ctx.send(ephemeral_reply(content)).await?;
-        return Ok(());
+        let msg = "You don't have enough trash dinos to slurp, the minimum is 2.";
+        return bail_reply(ctx, msg).await;
     }
 
     if sacrifices.len() % 2 == 1 {
