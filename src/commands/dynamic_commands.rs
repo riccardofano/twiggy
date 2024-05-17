@@ -2,7 +2,10 @@ use std::collections::{hash_map::Entry, HashMap};
 
 use poise::serenity_prelude::{CreateCommand, GuildId};
 
-use crate::{common::ephemeral_reply, Context, Result, DEFAULT_COMMANDS};
+use crate::{
+    common::{bail_reply, ephemeral_reply},
+    Context, Result, DEFAULT_COMMANDS,
+};
 
 pub type SimpleCommands = HashMap<i64, HashMap<String, String>>;
 
@@ -90,9 +93,7 @@ async fn insert_command(
     let guild_commands = map.entry(guild_id).or_default();
     let Entry::Vacant(entry) = guild_commands.entry(name.to_owned()) else {
         // TODO: Should this be outside?
-        ctx.send(ephemeral_reply("The command already exists."))
-            .await?;
-        return Ok(());
+        return bail_reply(ctx, "The command already exists.").await;
     };
 
     sqlx::query!(
@@ -119,14 +120,10 @@ async fn update_command(
 
     let guild_id = guild_id.get() as i64;
     let Some(guild_commands) = map.get_mut(&guild_id) else {
-        ctx.send(ephemeral_reply("The command does not exist."))
-            .await?;
-        return Ok(());
+        return bail_reply(ctx, "This guild does not have this command.").await;
     };
     let Some(entry) = guild_commands.get_mut(name) else {
-        ctx.send(ephemeral_reply("The command does not exist."))
-            .await?;
-        return Ok(());
+        return bail_reply(ctx, "The command does not exist.").await;
     };
 
     sqlx::query!(
@@ -148,14 +145,10 @@ async fn delete_command(ctx: Context<'_>, guild_id: &GuildId, name: &str) -> Res
 
     let guild_id = guild_id.get() as i64;
     let Some(guild_commands) = map.get_mut(&guild_id) else {
-        ctx.send(ephemeral_reply("This command name does not exist."))
-            .await?;
-        return Ok(());
+        return bail_reply(ctx, "This guild does not have this command.").await;
     };
     let Entry::Occupied(entry) = guild_commands.entry(name.to_owned()) else {
-        ctx.send(ephemeral_reply("This command name does not exist."))
-            .await?;
-        return Ok(());
+        return bail_reply(ctx, "This command name does not exist.").await;
     };
 
     sqlx::query!(

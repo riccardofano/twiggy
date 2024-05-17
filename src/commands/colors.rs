@@ -8,7 +8,10 @@ use rand::Rng;
 use sqlx::SqlitePool;
 use tokio::sync::Mutex;
 
-use crate::{common::ephemeral_reply, Context, Result, SUB_ROLE_ID};
+use crate::{
+    common::{bail_reply, ephemeral_reply},
+    Context, Result, SUB_ROLE_ID,
+};
 
 // These commands were originally made in american english so I'm keeping them
 // that way, there won't be any `ou`s in this module.
@@ -36,74 +39,53 @@ async fn change(
     #[description = "The 6 digit hex color to change to"] hexcode: String,
 ) -> Result<()> {
     if let Err(reason) = reject_on_cooldown(ctx).await {
-        ctx.send(ephemeral_reply(reason.to_string())).await?;
-        return Ok(());
+        return bail_reply(ctx, reason.to_string()).await;
     }
 
     let Some(color) = to_color(&hexcode) else {
-        ctx.send(ephemeral_reply("Please provide a valid hex color code."))
-            .await?;
-        return Ok(());
+        return bail_reply(ctx, "Please provide a valid hex color code.").await;
     };
 
     let Some(member) = ctx.author_member().await else {
-        ctx.send(ephemeral_reply("I could not find your roles."))
-            .await?;
-        return Ok(());
+        return bail_reply(ctx, "I could not find your roles.").await;
     };
 
     if let Err(reason) = reject_non_subs(&member).await {
-        ctx.send(ephemeral_reply(reason.to_string())).await?;
-        return Ok(());
+        return bail_reply(ctx, reason.to_string()).await;
     }
 
     let role_name = match change_color(ctx, member, Some(color)).await {
         Ok(name) => name,
         Err(e) => {
             eprintln!("Error while trying to change color: {e}");
-            ctx.send(ephemeral_reply(
-                "Something went wrong while trying to change your color. :(",
-            ))
-            .await?;
-            return Ok(());
+            let msg = "Something went wrong while trying to change your color. :(";
+            return bail_reply(ctx, msg).await;
         }
     };
 
-    ctx.send(ephemeral_reply(format!(
-        "The role color {role_name} has been added!"
-    )))
-    .await?;
-
-    Ok(())
+    bail_reply(ctx, format!("The role color {role_name} has been added!")).await
 }
 
 /// Randomize your display color
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn random(ctx: Context<'_>) -> Result<()> {
     if let Err(reason) = reject_on_cooldown(ctx).await {
-        ctx.send(ephemeral_reply(reason.to_string())).await?;
-        return Ok(());
+        return bail_reply(ctx, reason.to_string()).await;
     }
 
     let Some(member) = ctx.author_member().await else {
-        ctx.send(ephemeral_reply("I could not find your roles."))
-            .await?;
-        return Ok(());
+        return bail_reply(ctx, "I could not find your roles.").await;
     };
 
     if let Err(reason) = reject_non_subs(&member).await {
-        ctx.send(ephemeral_reply(reason.to_string())).await?;
-        return Ok(());
+        return bail_reply(ctx, reason.to_string()).await;
     }
 
     let role_result = change_color(ctx, member, None).await;
     if let Err(e) = role_result {
         eprintln!("Error while trying to change to a random color: {e}");
-        ctx.send(ephemeral_reply(
-            "Something went wrong while trying to change your color. You're spared for now. :(",
-        ))
-        .await?;
-        return Ok(());
+        let msg = "Something went wrong while trying to change your color :(";
+        return bail_reply(ctx, msg).await;
     }
 
     update_last_random_cooldown(&ctx.data().database, &ctx.author().id.to_string()).await?;
@@ -120,19 +102,15 @@ async fn random(ctx: Context<'_>) -> Result<()> {
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn gamble(ctx: Context<'_>) -> Result<()> {
     if let Err(reason) = reject_on_cooldown(ctx).await {
-        ctx.send(ephemeral_reply(reason.to_string())).await?;
-        return Ok(());
+        return bail_reply(ctx, reason.to_string()).await;
     }
 
     let Some(member) = ctx.author_member().await else {
-        ctx.send(ephemeral_reply("I could not find your roles"))
-            .await?;
-        return Ok(());
+        return bail_reply(ctx, "I could not find your roles").await;
     };
 
     if let Err(reason) = reject_non_subs(&member).await {
-        ctx.send(ephemeral_reply(reason.to_string())).await?;
-        return Ok(());
+        return bail_reply(ctx, reason.to_string()).await;
     }
 
     let custom_data = ctx.parent_commands()[0]
@@ -145,19 +123,14 @@ async fn gamble(ctx: Context<'_>) -> Result<()> {
         rng.gen_range(0..=100)
     };
     if roll > *gamble_chance {
-        ctx.send(ephemeral_reply("Yay! You get to keep your color!"))
-            .await?;
-        return Ok(());
+        return bail_reply(ctx, "Yay! You get to keep your color!").await;
     }
 
     let role_result = change_color(ctx, member, None).await;
     if let Err(e) = role_result {
         eprintln!("Error while trying to change to a random color: {e}");
-        ctx.send(ephemeral_reply(
-            "Something went wrong while trying to change your color. You're spared for now. :(",
-        ))
-        .await?;
-        return Ok(());
+        let msg = "Something went wrong while trying to change your color :(";
+        return bail_reply(ctx, msg).await;
     }
 
     update_last_random_cooldown(&ctx.data().database, &ctx.author().id.to_string()).await?;
@@ -218,9 +191,7 @@ pub async fn favorite(
     #[description = "The 6 digit hex color to change to"] hexcode: String,
 ) -> Result<()> {
     let Some(color) = to_color(&hexcode) else {
-        ctx.send(ephemeral_reply("Please provide a valid hex color code."))
-            .await?;
-        return Ok(());
+        return bail_reply(ctx, "Please provide a valid hex color code.").await;
     };
     let color_code = format!("#{color:06X}");
     let author_id = ctx.author().id.to_string();
@@ -247,19 +218,15 @@ pub async fn favorite(
 #[poise::command(guild_only, slash_command, prefix_command)]
 pub async fn lazy(ctx: Context<'_>) -> Result<()> {
     if let Err(reason) = reject_on_cooldown(ctx).await {
-        ctx.send(ephemeral_reply(reason.to_string())).await?;
-        return Ok(());
+        return bail_reply(ctx, reason.to_string()).await;
     }
 
     let Some(member) = ctx.author_member().await else {
-        ctx.send(ephemeral_reply("Could not find your roles"))
-            .await?;
-        return Ok(());
+        return bail_reply(ctx, "Could not find your roles").await;
     };
 
     if let Err(reason) = reject_non_subs(&member).await {
-        ctx.send(ephemeral_reply(reason.to_string())).await?;
-        return Ok(());
+        return bail_reply(ctx, reason.to_string()).await;
     }
 
     let author_id = ctx.author().id.to_string();
@@ -274,19 +241,12 @@ pub async fn lazy(ctx: Context<'_>) -> Result<()> {
     .await?;
 
     let Some(color_code) = row.fav_color else {
-        ctx.send(ephemeral_reply(
-            "You're so lazy you haven't even set a favorite color, \
-            set one for next time!",
-        ))
-        .await?;
-
-        return Ok(());
+        let msg = "You're so lazy you haven't even set a favorite color, set one for next time!";
+        return bail_reply(ctx, msg).await;
     };
 
     let Some(author_member) = ctx.author_member().await else {
-        ctx.send(ephemeral_reply("Are you not in a guild right now?"))
-            .await?;
-        return Ok(());
+        return bail_reply(ctx, "Are you not in a guild right now?").await;
     };
 
     let Some(color) = to_color(&color_code) else {
@@ -294,13 +254,13 @@ pub async fn lazy(ctx: Context<'_>) -> Result<()> {
             .execute(&ctx.data().database)
             .await?;
 
-        ctx.send(ephemeral_reply(
+        return bail_reply(
+            ctx,
             "For some reason the color that was saved was invalid, \
             I reset it for you, \
             you should now set a new favorite.",
-        ))
-        .await?;
-        return Ok(());
+        )
+        .await;
     };
 
     let color_role = change_color(ctx, author_member, Some(color)).await?;
@@ -349,12 +309,13 @@ pub async fn uncolor(
 )]
 async fn setgamblechance(
     ctx: Context<'_>,
-    #[description = "Gamble chance percentage"] percent: u8,
+    #[description = "Gamble chance percentage"]
+    #[min = 0]
+    #[max = 100]
+    percent: u8,
 ) -> Result<()> {
     if !(0..=100).contains(&percent) {
-        ctx.send(ephemeral_reply("Please provide a number between 0 and 100"))
-            .await?;
-        return Ok(());
+        return bail_reply(ctx, "Please provide a number between 0 and 100").await;
     }
 
     let custom_data = ctx.parent_commands()[0]

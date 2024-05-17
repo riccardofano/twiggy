@@ -1,4 +1,4 @@
-use crate::{common::ephemeral_reply, Context, Result};
+use crate::{common::bail_reply, Context, Result};
 
 use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -29,13 +29,11 @@ pub async fn ask(
 ) -> Result<()> {
     let Ok(wolfram_app_id) = std::env::var("WOLFRAM_APP_ID") else {
         let msg = "The `ask` command does not work without a Wolfram App ID.";
-        ctx.say(msg).await?;
-        return Ok(());
+        return bail_reply(ctx, msg).await;
     };
 
     if let Err(cooldown_msg) = update_cooldown(ctx).await {
-        ctx.send(ephemeral_reply(cooldown_msg.to_string())).await?;
-        return Ok(());
+        return bail_reply(ctx, cooldown_msg.to_string()).await;
     }
 
     let answer = fetch_answer(&wolfram_app_id, &question, units).await?;

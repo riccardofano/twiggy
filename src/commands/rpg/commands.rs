@@ -4,8 +4,8 @@ use super::fight::RPGFight;
 
 use crate::commands::rpg::elo::find_ladder_rank;
 use crate::common::{
-    avatar_url, ephemeral_reply, ephemeral_text_message, name, nickname, reply_with_buttons,
-    response, text_message, update_response, Score,
+    avatar_url, bail_reply, ephemeral_text_message, name, nickname, reply_with_buttons, response,
+    text_message, update_response, Score,
 };
 use crate::Context;
 
@@ -48,9 +48,7 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
     let custom_data_lock = unwrap_custom_data(ctx);
 
     if custom_data_lock.read().await.in_progress {
-        ctx.send(ephemeral_reply("A RPG fight is already in progress"))
-            .await?;
-        return Ok(());
+        return bail_reply(ctx, "A RPG fight is already in progress").await;
     }
 
     let challenger = ctx.author();
@@ -61,17 +59,12 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         Ok(stats) => stats,
         Err(e) => {
             eprintln!("Could not retrieve {}'s last loss: {e:?}", challenger.name);
-            ctx.send(ephemeral_reply(
-                "Something went wrong when trying to join the fight.",
-            ))
-            .await?;
-            return Ok(());
+            return bail_reply(ctx, "Something went wrong when trying to join the fight.").await;
         }
     };
 
     if let Err(e) = assert_no_recent_loss(&challenger_stats, challenger_name) {
-        ctx.send(ephemeral_reply(e.to_string())).await?;
-        return Ok(());
+        return bail_reply(ctx, e.to_string()).await;
     };
 
     let challenger_character = Character::new(
@@ -279,9 +272,7 @@ async fn preview(
     #[description = "Whether the message will be shown to everyone or not"] silent: Option<bool>,
 ) -> Result<()> {
     if name.len() >= 256 {
-        ctx.send(ephemeral_reply("Name must have fewer than 256 characters."))
-            .await?;
-        return Ok(());
+        return bail_reply(ctx, "Name must have fewer than 256 characters.").await;
     }
 
     let silent = silent.unwrap_or(true);
@@ -331,11 +322,8 @@ async fn stats(ctx: Context<'_>, user: Option<User>, silent: Option<bool>) -> Re
     let character_scoresheet =
         try_get_character_scoresheet(&mut conn, &user.id.to_string()).await?;
     let Some(user_record) = character_scoresheet else {
-        ctx.send(ephemeral_reply(&format!(
-            "Hmm, {user_name}... It seems you are yet to test your steel."
-        )))
-        .await?;
-        return Ok(());
+        let msg = format!("Hmm, {user_name}... It seems you are yet to test your steel.");
+        return bail_reply(ctx, msg).await;
     };
 
     let CharacterScoresheet {
@@ -407,11 +395,7 @@ async fn ladder(ctx: Context<'_>, silent: Option<bool>) -> Result<()> {
     };
 
     if fields.is_empty() {
-        ctx.send(ephemeral_reply(
-            "The arena is clean. No violence has happend yet.",
-        ))
-        .await?;
-        return Ok(());
+        return bail_reply(ctx, "The arena is clean. No violence has happend yet.").await;
     }
     let embed = CreateEmbed::default()
         .colour(0x009933)
