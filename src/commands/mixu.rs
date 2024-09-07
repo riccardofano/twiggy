@@ -152,8 +152,10 @@ fn count_points(tiles: &[usize]) -> i64 {
 }
 
 async fn update_max_score(ctx: Context<'_>, score: i64, tiles: &[usize]) -> Result<()> {
-    let best_mixu_score = ctx.data().best_mixu.load(Ordering::Relaxed);
-    if score <= best_mixu_score {
+    let best_mixu_score = &ctx.data().best_mixu;
+
+    // NOTE: fetch_max returns the previous value stored
+    if best_mixu_score.fetch_max(score, Ordering::SeqCst) >= score {
         return Ok(());
     }
 
@@ -172,8 +174,6 @@ async fn update_max_score(ctx: Context<'_>, score: i64, tiles: &[usize]) -> Resu
     )
     .execute(&ctx.data().database)
     .await?;
-
-    ctx.data().best_mixu.store(score, Ordering::Relaxed);
 
     Ok(())
 }
