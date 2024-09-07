@@ -13,14 +13,19 @@ const MIXU_BANNER: &str =
 const MIKU_BANNER: &str =
     ":regional_indicator_m::regional_indicator_i::regional_indicator_k::regional_indicator_u:";
 const MIKU_POSITIONS: [usize; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-static MIXU_PIECES: OnceCell<Vec<Emoji>> = OnceCell::const_new();
 
-pub async fn initialize_best_mixu_score(db: &SqlitePool) -> Result<Option<AtomicI64>> {
+static MIXU_PIECES: OnceCell<Vec<Emoji>> = OnceCell::const_new();
+static BEST_MIXU_SCORE: AtomicI64 = AtomicI64::new(0);
+
+pub async fn set_initial_best_mixu_score(db: &SqlitePool) -> Result<()> {
     let row = sqlx::query!("SELECT score FROM BestMixu ORDER BY rowid DESC LIMIT 1")
         .fetch_optional(db)
         .await?;
 
-    Ok(row.map(|r| r.score.into()))
+    let score = row.map(|r| r.score).unwrap_or_default();
+    BEST_MIXU_SCORE.store(score, Ordering::Relaxed);
+
+    Ok(())
 }
 
 /// Generate a random mixu
@@ -152,10 +157,8 @@ fn count_points(tiles: &[usize]) -> i64 {
 }
 
 async fn update_max_score(ctx: Context<'_>, score: i64, tiles: &[usize]) -> Result<()> {
-    let best_mixu_score = &ctx.data().best_mixu;
-
     // NOTE: fetch_max returns the previous value stored
-    if best_mixu_score.fetch_max(score, Ordering::SeqCst) >= score {
+    if BEST_MIXU_SCORE.fetch_max(score, Ordering::SeqCst) >= score {
         return Ok(());
     }
 

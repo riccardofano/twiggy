@@ -3,7 +3,7 @@ mod common;
 
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
-use std::sync::{atomic::AtomicI64, OnceLock};
+use std::sync::OnceLock;
 
 use anyhow::Result;
 use commands::*;
@@ -17,7 +17,6 @@ pub struct Data {
     database: sqlx::SqlitePool,
     rpg_summary_cache: Mutex<LruCache<u64, String>>,
     quote_data: RwLock<QuoteData>,
-    best_mixu: AtomicI64,
     simple_commands: RwLock<SimpleCommands>,
 }
 pub type Context<'a> = poise::Context<'a, Data, anyhow::Error>;
@@ -65,12 +64,13 @@ async fn main() {
         uncolor(),
     ];
 
+    // Initialize default commands
     DEFAULT_COMMANDS.get_or_init(|| commands.iter().map(|c| c.name.clone()).collect::<Vec<_>>());
 
-    let best_mixu = initialize_best_mixu_score(&database)
+    // Initialize mixu score
+    set_initial_best_mixu_score(&database)
         .await
-        .expect("Unable to get best mixu score")
-        .unwrap_or_default();
+        .expect("Unable to set best mixu score");
 
     let options = poise::FrameworkOptions {
         commands,
@@ -91,7 +91,6 @@ async fn main() {
         rpg_summary_cache: Mutex::new(LruCache::new(NonZeroUsize::new(10).unwrap())),
         quote_data: RwLock::default(),
         simple_commands: RwLock::default(),
-        best_mixu,
     };
     let framework = poise::Framework::builder()
         .options(options)
