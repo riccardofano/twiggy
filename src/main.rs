@@ -16,7 +16,6 @@ use tokio::sync::{Mutex, RwLock};
 pub struct Data {
     database: sqlx::SqlitePool,
     rpg_summary_cache: Mutex<LruCache<u64, String>>,
-    quote_data: RwLock<QuoteData>,
     simple_commands: RwLock<SimpleCommands>,
 }
 pub type Context<'a> = poise::Context<'a, Data, anyhow::Error>;
@@ -89,7 +88,6 @@ async fn main() {
     let user_data = Data {
         database,
         rpg_summary_cache: Mutex::new(LruCache::new(NonZeroUsize::new(10).unwrap())),
-        quote_data: RwLock::default(),
         simple_commands: RwLock::default(),
     };
     let framework = poise::Framework::builder()
