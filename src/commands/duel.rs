@@ -2,44 +2,36 @@ use crate::common::{
     avatar_url, bail_reply, colour, ephemeral_text_message, name, reply_with_buttons, response,
     text_message, update_response,
 };
-use crate::Context;
+use crate::Context as DiscordContext;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use poise::serenity_prelude::{
     ButtonStyle, CreateActionRow, CreateButton, CreateEmbed, CreateEmbedAuthor, Member, User,
     UserId,
 };
-use poise::CreateReply;
+use poise::{CreateReply, ReplyHandle};
 use rand::Rng;
 use serenity::all::{ComponentInteraction, ComponentInteractionCollector, MessageId};
 use sqlx::{Connection, SqliteExecutor, Transaction};
 use std::cmp::Ordering;
 use std::fmt::Display;
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::time::Duration;
-use tokio::sync::RwLock;
 
-const DEAD_DUEL_COOLDOWN: Duration = Duration::from_secs(5 * 60);
 // TODO: this should be replaced with a const chrono::Duration when that gets stabilized
 const LOSS_COOLDOWN: i64 = 60;
+const DEAD_DUEL_COOLDOWN: Duration = Duration::from_secs(5 * 60);
 const TIMEOUT_DURATION: Duration = Duration::from_secs(10 * 60);
 
-#[derive(Default)]
-struct DuelData {
-    in_progress: bool,
-}
+static IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
 /// Challenge the chat to a duel
-#[poise::command(
-    slash_command,
-    guild_only,
-    custom_data = "RwLock::new(DuelData::default())"
-)]
-pub async fn duel(ctx: Context<'_>) -> Result<()> {
+#[poise::command(slash_command, guild_only)]
+pub async fn duel(ctx: DiscordContext<'_>) -> Result<()> {
     let challenger = DuelUser::from(ctx, ctx.author()).await;
-    let custom_data_lock = unwrap_duel_data(ctx);
 
-    if custom_data_lock.read().await.in_progress {
+    if IN_PROGRESS.load(AtomicOrdering::Acquire) {
         return bail_reply(ctx, "A duel is already in progress").await;
     }
 
@@ -47,31 +39,39 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
         return bail_reply(ctx, e.to_string()).await;
     }
 
-    let initial_msg = format!("{challenger} is looking for a duel, press the button to accept.",);
-    let accept_reply = ctx
+    let reply_content = format!("{challenger} is looking for a duel, press the button to accept.");
+    let reply_handle = ctx
         .send(reply_with_buttons(
-            initial_msg,
+            reply_content,
             vec![create_accept_button()],
         ))
         .await?;
 
-    update_in_progress_status(custom_data_lock, true).await;
+    // Make sure the in_progress status gets updated even on failure
+    IN_PROGRESS.store(true, AtomicOrdering::Release);
+    if let Err(e) = run_duel(ctx, challenger, reply_handle).await {
+        eprintln!("Failed to run duel to completiton: {e:?}");
+    }
+    IN_PROGRESS.store(false, AtomicOrdering::Release);
 
-    let opponent = find_opponent(
-        ctx,
-        custom_data_lock,
-        accept_reply.message().await?.id,
-        challenger.id.get(),
-    )
-    .await;
+    Ok(())
+}
+
+async fn run_duel(
+    ctx: DiscordContext<'_>,
+    challenger: DuelUser,
+    reply_handle: ReplyHandle<'_>,
+) -> Result<()> {
+    let message = reply_handle.message().await?;
+    let opponent = find_opponent(ctx, message.id, challenger.id.get()).await;
 
     let Some((interaction, accepter)) = opponent else {
         let duel_timeout_msg = format!("{challenger} failed to find someone to duel.");
-        accept_reply
+
+        reply_handle
             .edit(ctx, reply_with_buttons(duel_timeout_msg, Vec::new()))
             .await?;
 
-        update_in_progress_status(custom_data_lock, false).await;
         return Ok(());
     };
 
@@ -108,20 +108,18 @@ pub async fn duel(ctx: Context<'_>) -> Result<()> {
                 .into()
         }
     };
-    transaction.commit().await?;
 
     let final_message = format!("{accepter} has rolled a {accepter_score} and {challenger} has rolled a {challenger_score}. {winner_text}");
-    let update_resp = update_response(text_message(final_message));
+    let update_resp = update_response(text_message(final_message).components(Vec::new()));
     interaction.create_response(ctx, update_resp).await?;
 
-    update_in_progress_status(custom_data_lock, false).await;
+    transaction.commit().await?;
 
     Ok(())
 }
 
 async fn find_opponent(
-    ctx: Context<'_>,
-    custom_data: &RwLock<DuelData>,
+    ctx: DiscordContext<'_>,
     message_id: MessageId,
     challenger_id: u64,
 ) -> Option<(ComponentInteraction, DuelUser)> {
@@ -140,15 +138,17 @@ async fn find_opponent(
             continue;
         }
 
-        if !custom_data.read().await.in_progress {
-            let resp = response(text_message("Someone beat you to the challenge already"));
+        if !IN_PROGRESS.load(AtomicOrdering::Acquire) {
+            let resp = response(ephemeral_text_message(
+                "Someone beat you to the challenge already",
+            ));
             interaction.create_response(ctx, resp).await.ok()?;
             continue;
         }
 
         let accepter = DuelUser::from(ctx, &interaction.user).await;
         if let Err(e) = accepter.ensure_outside_cooldown(ctx).await {
-            let resp = response(text_message(e.to_string()));
+            let resp = response(ephemeral_text_message(e.to_string()));
             interaction.create_response(ctx, resp).await.ok()?;
             continue;
         }
@@ -161,7 +161,7 @@ async fn find_opponent(
 
 /// Display your duel statistics
 #[poise::command(slash_command)]
-pub async fn duelstats(ctx: Context<'_>) -> Result<()> {
+pub async fn duelstats(ctx: DiscordContext<'_>) -> Result<()> {
     let user = ctx.author();
     let conn = &mut ctx.data().database.acquire().await?;
 
@@ -193,6 +193,8 @@ pub async fn duelstats(ctx: Context<'_>) -> Result<()> {
 }
 
 async fn get_last_loss(executor: impl SqliteExecutor<'_>, user_id: &str) -> Result<NaiveDateTime> {
+    // Insert a new User so that DuelStats always has a user to reference when
+    // we set the wins/losses/draws after the duel
     let row = sqlx::query!(
         r#"
         INSERT OR IGNORE INTO User (id) VALUES (?);
@@ -202,18 +204,21 @@ async fn get_last_loss(executor: impl SqliteExecutor<'_>, user_id: &str) -> Resu
         user_id
     )
     .fetch_one(executor)
-    .await?;
+    .await
+    .with_context(|| format!("Failed to get {user_id}'s last loss"))?;
 
     Ok(row.last_loss)
 }
 
 async fn update_last_loss(executor: impl SqliteExecutor<'_>, user_id: &str) -> Result<()> {
     sqlx::query!(
-        "UPDATE User SET last_loss = datetime('now') WHERE id = ?",
+        r#"INSERT INTO User (id, last_loss) VALUES (?, datetime('now'))
+        ON CONFLICT(id) DO UPDATE SET last_loss = datetime('now')"#,
         user_id
     )
     .execute(executor)
-    .await?;
+    .await
+    .with_context(|| format!("Failed to update {user_id}'s last loss"))?;
 
     Ok(())
 }
@@ -224,27 +229,27 @@ async fn update_users_win_loss(
     loser_id: &str,
 ) -> Result<()> {
     sqlx::query!(
-        r#"INSERT OR IGNORE INTO Duels (user_id) VALUES (?);
-        UPDATE Duels SET
+        r#"INSERT INTO DuelStats (user_id, wins, win_streak, win_streak_max)
+        VALUES (?, 1, 1, 1)
+        ON CONFLICT(user_id) DO UPDATE SET
             wins = wins + 1,
             win_streak = win_streak + 1,
             win_streak_max = MAX(win_streak_max, win_streak + 1),
-            loss_streak = 0
-        WHERE user_id = ?;
-        INSERT OR IGNORE INTO Duels (user_id) VALUES (?);
-        UPDATE Duels SET
+            loss_streak = 0;
+
+        INSERT INTO DuelStats (user_id, losses, loss_streak, loss_streak_max)
+        VALUES (?, 1, 1, 1)
+        ON CONFLICT(user_id) DO UPDATE SET
             losses = losses + 1,
             loss_streak = loss_streak + 1,
             loss_streak_max = MAX(loss_streak_max, loss_streak + 1),
-            win_streak = 0
-        WHERE user_id = ?"#,
+            win_streak = 0;"#,
         winner_id,
-        winner_id,
-        loser_id,
         loser_id
     )
     .execute(&mut *executor)
-    .await?;
+    .await
+    .with_context(|| format!("Failed to update {winner_id} and/or {loser_id}'s wins/losses"))?;
 
     Ok(())
 }
@@ -255,22 +260,15 @@ async fn update_users_drawn(
     accepter_id: &str,
 ) -> Result<()> {
     sqlx::query!(
-        r#"INSERT OR IGNORE INTO Duels (user_id) VALUES (?);
-        UPDATE Duels SET draws = draws + 1, win_streak = 0, loss_streak = 0 WHERE user_id = ?"#,
+        r#"INSERT INTO DuelStats (user_id, draws) VALUES (?, 1), (?, 1)
+        ON CONFLICT(user_id)
+        DO UPDATE SET draws = draws + 1, win_streak = 0, loss_streak = 0;"#,
         challenger_id,
-        challenger_id
-    )
-    .execute(&mut *executor)
-    .await?;
-
-    sqlx::query!(
-        r#"INSERT OR IGNORE INTO Duels (user_id) VALUES (?);
-        UPDATE Duels SET draws = draws + 1, win_streak = 0, loss_streak = 0 WHERE user_id = ?"#,
-        accepter_id,
         accepter_id
     )
     .execute(&mut *executor)
-    .await?;
+    .await
+    .with_context(|| format!("Failed to update {challenger_id} and {accepter_id}'s draws"))?;
 
     Ok(())
 }
@@ -313,16 +311,17 @@ async fn get_duel_stats(
 ) -> Result<Option<DuelStats>> {
     let stats = sqlx::query_as!(
         DuelStats,
-        r#"SELECT * FROM Duels WHERE user_id = ?"#,
+        r#"SELECT * FROM DuelStats WHERE user_id = ?"#,
         user_id
     )
     .fetch_optional(executor)
-    .await?;
+    .await
+    .with_context(|| format!("Failed to get {user_id}'s duel stats"))?;
 
     Ok(stats)
 }
 
-async fn timeout_user(ctx: Context<'_>, member: Option<Member>, until: DateTime<Utc>) {
+async fn timeout_user(ctx: DiscordContext<'_>, member: Option<Member>, until: DateTime<Utc>) {
     let Some(mut member) = member else {
         return;
     };
@@ -333,18 +332,6 @@ async fn timeout_user(ctx: Context<'_>, member: Option<Member>, until: DateTime<
     {
         eprintln!("Failed to timeout {}, reason: {e:?}", member.user.name);
     }
-}
-
-fn unwrap_duel_data(ctx: Context<'_>) -> &RwLock<DuelData> {
-    ctx.command()
-        .custom_data
-        .downcast_ref::<RwLock<DuelData>>()
-        .expect("Expected to have passed a DuelData struct as custom_data")
-}
-
-async fn update_in_progress_status(custom_data_lock: &RwLock<DuelData>, new_status: bool) {
-    let mut cmd_data = custom_data_lock.write().await;
-    cmd_data.in_progress = new_status;
 }
 
 fn create_accept_button() -> CreateActionRow {
@@ -363,7 +350,7 @@ struct DuelUser {
 }
 
 impl DuelUser {
-    async fn from(ctx: Context<'_>, user: &User) -> Self {
+    async fn from(ctx: DiscordContext<'_>, user: &User) -> Self {
         let id = user.id;
 
         Self {
@@ -373,7 +360,7 @@ impl DuelUser {
         }
     }
 
-    async fn ensure_outside_cooldown(&self, ctx: Context<'_>) -> Result<()> {
+    async fn ensure_outside_cooldown(&self, ctx: DiscordContext<'_>) -> Result<()> {
         let last_loss = match get_last_loss(&ctx.data().database, &self.string_id).await {
             Ok(last_loss) => last_loss,
             Err(e) => {
