@@ -1,7 +1,7 @@
 use super::character::Character;
 use super::data::{Stat, VictoryKind};
 
-use crate::common::{pick_best_x_dice_rolls, Score};
+use crate::common::pick_best_x_dice_rolls;
 
 use rand::seq::SliceRandom;
 use std::cmp;
@@ -10,22 +10,10 @@ use std::fmt::Display;
 const OUTPUT_WIDTH: usize = 24;
 const MAX_ROUNDS: usize = 10;
 
-pub enum FightResult {
+pub enum FightOutcome {
     ChallengerWin,
     AccepterWin,
     Draw,
-}
-
-impl FightResult {
-    pub fn to_score(&self, is_challenger: bool) -> Score {
-        match (self, is_challenger) {
-            (FightResult::ChallengerWin, true) => Score::Win,
-            (FightResult::ChallengerWin, false) => Score::Loss,
-            (FightResult::AccepterWin, true) => Score::Loss,
-            (FightResult::AccepterWin, false) => Score::Win,
-            _ => Score::Draw,
-        }
-    }
 }
 
 pub struct RPGFight {
@@ -45,7 +33,7 @@ impl RPGFight {
         }
     }
 
-    pub fn fight(&mut self) -> FightResult {
+    pub fn fight(&mut self) -> FightOutcome {
         let mut rounds = 0;
 
         while self.challenger.hp > 0 && self.accepter.hp > 0 && rounds < MAX_ROUNDS {
@@ -70,12 +58,16 @@ impl RPGFight {
         }
 
         let (result, victor, loser) = if self.accepter.hp == 0 {
-            (FightResult::ChallengerWin, &self.challenger, &self.accepter)
+            (
+                FightOutcome::ChallengerWin,
+                &self.challenger,
+                &self.accepter,
+            )
         } else if self.challenger.hp == 0 {
-            (FightResult::AccepterWin, &self.accepter, &self.challenger)
+            (FightOutcome::AccepterWin, &self.accepter, &self.challenger)
         } else {
             self.summary = format!("After {MAX_ROUNDS} rounds they decide to call it a draw.");
-            return FightResult::Draw;
+            return FightOutcome::Draw;
         };
 
         self.log += "\n";

@@ -159,7 +159,7 @@ pub fn calculate_lp_difference(old_elo: i64, new_elo: i64) -> String {
     }
 }
 
-pub fn calculate_new_elo(player_rank: i64, opponent_rank: i64, outcome: &Score) -> i64 {
+pub fn calculate_new_elo(player_rank: i64, opponent_rank: i64, outcome: Score) -> i64 {
     let base: f64 = 10.;
     let exponent = 1. / 400.;
     let expected = 1. / (1. + base.powf(exponent * (opponent_rank - player_rank) as f64));

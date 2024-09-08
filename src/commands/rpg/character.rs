@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 
+use chrono::NaiveDateTime;
 use poise::serenity_prelude::CreateEmbed;
 use rand::SeedableRng;
 use rand::{rngs::StdRng, seq::SliceRandom};
@@ -27,8 +28,16 @@ const DEFAULT_STATS: [(Stat, u8); 6] = [
     (Stat::WIS, 0),
 ];
 
+#[derive(Default)]
+pub struct CharacterPastStats {
+    pub last_loss: NaiveDateTime,
+    pub elo_rank: i64,
+}
+
 pub struct Character {
     pub user_id: u64,
+    pub record: CharacterPastStats,
+
     pub hp: isize,
     pub max_hp: isize,
     pub name: String,
@@ -41,7 +50,7 @@ pub struct Character {
 }
 
 impl Character {
-    pub fn new(user: &User, nickname: Option<&str>) -> Self {
+    pub fn new(user: &User, nickname: Option<&str>, record: CharacterPastStats) -> Self {
         let user_id = user.id.get();
         let seed = nickname;
         let name = nickname.unwrap_or(&user.name);
@@ -90,6 +99,7 @@ impl Character {
 
         Self {
             user_id,
+            record,
             hp: max_hp,
             max_hp,
             name: name.to_string(),

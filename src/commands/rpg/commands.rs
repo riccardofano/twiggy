@@ -1,6 +1,6 @@
-use super::character::Character;
+use super::character::{Character, CharacterPastStats};
 use super::elo::{calculate_lp_difference, calculate_new_elo, LadderPosition};
-use super::fight::RPGFight;
+use super::fight::{FightOutcome, RPGFight};
 
 use crate::commands::rpg::elo::find_ladder_rank;
 use crate::common::{
@@ -9,7 +9,7 @@ use crate::common::{
 };
 use crate::Context;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context as DiscordContext, Result};
 use chrono::{NaiveDateTime, Utc};
 use poise::serenity_prelude::{ButtonStyle, CreateActionRow};
 use poise::serenity_prelude::{
@@ -17,7 +17,7 @@ use poise::serenity_prelude::{
 };
 use poise::{CreateReply, ReplyHandle};
 use serenity::all::{ComponentInteraction, ComponentInteractionCollector, MessageId};
-use sqlx::{Connection, QueryBuilder, SqliteConnection};
+use sqlx::{Connection, SqliteConnection};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -54,7 +54,8 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
     };
 
     let challenger_nick = nickname(&ctx, challenger).await;
-    let challenger_character = Character::new(challenger, challenger_nick.as_deref());
+    let challenger_character =
+        Character::new(challenger, challenger_nick.as_deref(), challenger_stats);
 
     let reply_content = format!(
         "{} is throwing down the gauntlet in challenge...",
@@ -68,7 +69,7 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         .await?;
 
     IN_PROGRESS.store(true, Ordering::Release);
-    if let Err(e) = run_duel(ctx, challenger_character, challenger_stats, reply_handle).await {
+    if let Err(e) = run_duel(ctx, challenger_character, reply_handle).await {
         eprintln!("Failed to run duel to completion: {e:?}");
     }
     IN_PROGRESS.store(false, Ordering::Release);
@@ -79,11 +80,12 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
 async fn run_duel(
     ctx: Context<'_>,
     challenger_character: Character,
-    challenger_stats: CharacterPastStats,
     reply_handle: ReplyHandle<'_>,
 ) -> Result<()> {
     let message = reply_handle.message().await?;
-    let Some(interaction) = find_opponent(ctx, message.id, challenger_character.user_id).await?
+
+    let Some((interaction, accepter_stats)) =
+        find_opponent(ctx, message.id, challenger_character.user_id).await?
     else {
         let content = format!(
             "No one was brave enough to do battle with **{}**",
@@ -97,8 +99,7 @@ async fn run_duel(
 
     let accepter = &interaction.user;
     let accepter_nick = nickname(&ctx, accepter).await;
-    let accepter_character = Character::new(accepter, accepter_nick.as_deref());
-    let accepter_stats = retrieve_user_stats(ctx, accepter).await?;
+    let accepter_character = Character::new(accepter, accepter_nick.as_deref(), accepter_stats);
 
     let mut fight = RPGFight::new(challenger_character, accepter_character);
     let fight_result = fight.fight();
@@ -106,23 +107,8 @@ async fn run_duel(
     let mut conn = ctx.data().database.acquire().await?;
     let mut transaction = conn.begin().await?;
 
-    let new_challenger_elo = update_character_stats(
-        &mut transaction,
-        fight.challenger.user_id,
-        challenger_stats.elo_rank,
-        accepter_stats.elo_rank,
-        fight_result.to_score(true),
-    )
-    .await?;
-
-    let new_accepter_elo = update_character_stats(
-        &mut transaction,
-        accepter.id.get(),
-        accepter_stats.elo_rank,
-        challenger_stats.elo_rank,
-        fight_result.to_score(false),
-    )
-    .await?;
+    let (challenger_elo, accepter_elo) =
+        update_character_stats(&mut transaction, &fight, fight_result).await?;
 
     let fight_log = fight.to_string();
     new_fight_record(&mut transaction, &message.id.to_string(), &fight_log).await?;
@@ -131,12 +117,12 @@ async fn run_duel(
     update_summary_cache(ctx, message.id.get(), &fight_log).await;
 
     let elo_change_summary = format!(
-        "**{}**{} [{new_challenger_elo}]. \
-            **{}**{} [{new_accepter_elo}].",
+        "**{}**{} [{challenger_elo}]. \
+            **{}**{} [{accepter_elo}].",
         &fight.challenger.name,
-        calculate_lp_difference(challenger_stats.elo_rank, new_challenger_elo),
+        calculate_lp_difference(fight.challenger.record.elo_rank, challenger_elo),
         &fight.accepter.name,
-        calculate_lp_difference(accepter_stats.elo_rank, new_accepter_elo)
+        calculate_lp_difference(fight.accepter.record.elo_rank, accepter_elo)
     );
 
     let final_message = format!("{}\n{}", fight.summary(), elo_change_summary);
@@ -151,7 +137,7 @@ async fn find_opponent(
     ctx: Context<'_>,
     message_id: MessageId,
     challenger_id: u64,
-) -> Result<Option<ComponentInteraction>> {
+) -> Result<Option<(ComponentInteraction, CharacterPastStats)>> {
     while let Some(interaction) = ComponentInteractionCollector::new(ctx)
         .message_id(message_id)
         .filter(move |f| f.data.custom_id == "rpg-btn")
@@ -180,7 +166,7 @@ async fn find_opponent(
             continue;
         }
 
-        return Ok(Some(interaction));
+        return Ok(Some((interaction, accepter_stats)));
     }
 
     Ok(None)
@@ -244,7 +230,7 @@ async fn preview(
     }
 
     let silent = silent.unwrap_or(true);
-    let character = Character::new(ctx.author(), Some(&name));
+    let character = Character::new(ctx.author(), Some(&name), CharacterPastStats::default());
     ctx.send(
         CreateReply::default()
             .embed(character.to_embed())
@@ -266,7 +252,7 @@ async fn character(
     let user = user.as_ref().unwrap_or_else(|| ctx.author());
 
     let nick = nickname(&ctx, user).await;
-    let character = Character::new(user, nick.as_deref());
+    let character = Character::new(user, nick.as_deref(), CharacterPastStats::default());
 
     ctx.send(
         CreateReply::default()
@@ -375,11 +361,6 @@ async fn ladder(ctx: Context<'_>, silent: Option<bool>) -> Result<()> {
     Ok(())
 }
 
-struct CharacterPastStats {
-    last_loss: NaiveDateTime,
-    elo_rank: i64,
-}
-
 async fn get_character_stats(
     conn: &mut SqliteConnection,
     user_id: u64,
@@ -430,33 +411,104 @@ async fn try_get_character_scoresheet(
 
 async fn update_character_stats(
     conn: &mut SqliteConnection,
-    user_id: u64,
-    elo_rank: i64,
-    opponent_elo_rank: i64,
-    outcome: Score,
-) -> Result<i64> {
-    let new_elo = calculate_new_elo(elo_rank, opponent_elo_rank, &outcome);
+    fight: &RPGFight,
+    outcome: FightOutcome,
+) -> Result<(i64, i64)> {
+    match outcome {
+        FightOutcome::ChallengerWin => {
+            update_stats_win_loss(conn, &fight.challenger, &fight.accepter).await
+        }
+        FightOutcome::AccepterWin => {
+            let (a_elo, c_elo) =
+                update_stats_win_loss(conn, &fight.accepter, &fight.challenger).await?;
+            Ok((c_elo, a_elo))
+        }
+        FightOutcome::Draw => update_stats_draw(conn, &fight.challenger, &fight.accepter).await,
+    }
+}
 
-    let update_query = match outcome {
-        Score::Win => "wins = wins + 1",
-        Score::Loss => "last_loss = datetime('now'), losses = losses + 1",
-        Score::Draw => "draws = draws + 1",
-    };
+async fn update_stats_draw(
+    conn: &mut SqliteConnection,
+    challenger: &Character,
+    accepter: &Character,
+) -> Result<(i64, i64)> {
+    let challenger_elo = calculate_new_elo(
+        challenger.record.elo_rank,
+        accepter.record.elo_rank,
+        Score::Draw,
+    );
+    let accepter_elo = calculate_new_elo(
+        accepter.record.elo_rank,
+        challenger.record.elo_rank,
+        Score::Draw,
+    );
 
-    let mut query = QueryBuilder::new("UPDATE RPGCharacter SET elo_rank = ");
-    query.push_bind(new_elo);
-    query.push(", peak_elo = MAX(peak_elo, ");
-    query.push_bind(new_elo);
-    query.push("), floor_elo = MIN(floor_elo, ");
-    query.push_bind(new_elo);
-    query.push("), ");
-    query.push(update_query);
-    query.push(" WHERE user_id = ");
-    query.push_bind(user_id.to_string());
+    let challenger_id = challenger.user_id.to_string();
+    let accepter_id = accepter.user_id.to_string();
+    sqlx::query!(
+        r#"INSERT INTO RPGCharacter (user_id, wins, elo_rank, peak_elo, floor_elo)
+        VALUES ($1, 1, $2, $2, $2), ($3, 1, $4, $4, $4)
+        ON CONFLICT(user_id) DO UPDATE SET
+        draws = draws + 1,
+        elo_rank = excluded.elo_rank,
+        peak_elo = MAX(peak_elo, excluded.elo_rank),
+        floor_elo = MAX(floor_elo, excluded.elo_rank);"#,
+        challenger_id,
+        challenger_elo,
+        accepter_id,
+        accepter_elo
+    )
+    .execute(conn)
+    .await
+    .with_context(|| {
+        format!(
+            "Failed to update {} and/or {}'s draws",
+            challenger.name, accepter.name
+        )
+    })?;
 
-    query.build().execute(conn).await?;
+    Ok((challenger_elo, accepter_elo))
+}
 
-    Ok(new_elo)
+async fn update_stats_win_loss(
+    conn: &mut SqliteConnection,
+    victor: &Character,
+    loser: &Character,
+) -> Result<(i64, i64)> {
+    let victor_elo = calculate_new_elo(victor.record.elo_rank, loser.record.elo_rank, Score::Win);
+    let loser_elo = calculate_new_elo(loser.record.elo_rank, victor.record.elo_rank, Score::Loss);
+
+    let victor_id = victor.user_id.to_string();
+    let loser_id = loser.user_id.to_string();
+    sqlx::query!(
+        r#"INSERT INTO RPGCharacter (user_id, wins, elo_rank, peak_elo, floor_elo)
+        VALUES ($1, 1, $2, $2, $2)
+        ON CONFLICT(user_id) DO UPDATE SET
+            wins = wins + 1,
+            elo_rank = $2,
+            peak_elo = MAX(peak_elo, $2);
+
+        INSERT INTO RPGCharacter (user_id, losses, elo_rank, peak_elo, floor_elo)
+        VALUES ($3, 1, $4, $4, $4)
+        ON CONFLICT(user_id) DO UPDATE SET
+            losses = losses + 1,
+            elo_rank = $4,
+            floor_elo = MIN(floor_elo, $4);"#,
+        victor_id,
+        victor_elo,
+        loser_id,
+        loser_elo
+    )
+    .execute(conn)
+    .await
+    .with_context(|| {
+        format!(
+            "Failed to update {} and/or {}'s wins/losses",
+            victor.name, loser.name
+        )
+    })?;
+
+    Ok((victor_elo, loser_elo))
 }
 
 async fn new_fight_record(conn: &mut SqliteConnection, message_id: &str, log: &str) -> Result<()> {
