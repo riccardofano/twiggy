@@ -29,10 +29,10 @@ impl FightResult {
 }
 
 pub struct RPGFight {
-    challenger: Character,
-    accepter: Character,
-    log: String,
-    summary: String,
+    pub challenger: Character,
+    pub accepter: Character,
+    pub log: String,
+    pub summary: String,
 }
 
 impl RPGFight {

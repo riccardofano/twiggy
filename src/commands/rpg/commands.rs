@@ -15,14 +15,17 @@ use poise::serenity_prelude::{ButtonStyle, CreateActionRow};
 use poise::serenity_prelude::{
     CreateButton, CreateEmbed, CreateEmbedAuthor, Mention, User, UserId,
 };
-use poise::CreateReply;
+use poise::{CreateReply, ReplyHandle};
+use serenity::all::{ComponentInteraction, ComponentInteractionCollector, MessageId};
 use sqlx::{Connection, QueryBuilder, SqliteConnection};
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tokio::sync::RwLock;
 
 const DEAD_DUEL_COOLDOWN: Duration = Duration::from_secs(5 * 60);
 const LOSS_COOLDOWN: Duration = Duration::from_secs(30);
+
+static IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
 #[poise::command(
     slash_command,
@@ -33,74 +36,146 @@ pub async fn rpg(_ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
-#[derive(Default)]
-struct ChallengeData {
-    in_progress: bool,
-}
-
 /// Challenge other chatters and prove your strength.
-#[poise::command(
-    slash_command,
-    guild_only,
-    custom_data = "RwLock::new(ChallengeData::default())"
-)]
+#[poise::command(slash_command, guild_only)]
 async fn challenge(ctx: Context<'_>) -> Result<()> {
-    let custom_data_lock = unwrap_custom_data(ctx);
-
-    if custom_data_lock.read().await.in_progress {
+    if IN_PROGRESS.load(Ordering::Acquire) {
         return bail_reply(ctx, "A RPG fight is already in progress").await;
     }
 
     let challenger = ctx.author();
     let challenger_nick = nickname(&ctx, challenger).await;
-    let challenger_name = challenger_nick.as_deref().unwrap_or(&challenger.name);
+    let challenger_nick = challenger_nick.as_deref();
 
-    let challenger_stats = match retrieve_user_stats(ctx, challenger).await {
-        Ok(stats) => stats,
-        Err(e) => {
-            eprintln!("Could not retrieve {}'s last loss: {e:?}", challenger.name);
-            return bail_reply(ctx, "Something went wrong when trying to join the fight.").await;
-        }
+    let Ok(challenger_stats) = retrieve_user_stats(ctx, challenger).await else {
+        return bail_reply(ctx, "Something went wrong when trying to join the fight.").await;
     };
 
-    if let Err(e) = assert_no_recent_loss(&challenger_stats, challenger_name) {
+    if let Err(e) = assert_no_recent_loss(&challenger_stats) {
         return bail_reply(ctx, e.to_string()).await;
     };
 
     let challenger_character = Character::new(
         challenger.id.get(),
-        challenger_name,
-        &challenger_nick.as_deref(),
+        challenger_nick.unwrap_or(&challenger.name),
+        challenger_nick,
     );
 
-    let initial_msg = format!("{challenger_name} is throwing down the gauntlet in challenge...");
-    let accept_reply = ctx
+    let reply_content = format!(
+        "{} is throwing down the gauntlet in challenge...",
+        challenger_character.name
+    );
+    let reply_handle = ctx
         .send(reply_with_buttons(
-            initial_msg,
+            reply_content,
             vec![create_accept_button()],
         ))
         .await?;
 
-    update_in_progress_status(custom_data_lock, true).await;
+    IN_PROGRESS.store(true, Ordering::Release);
+    if let Err(e) = run_duel(ctx, challenger_character, challenger_stats, reply_handle).await {
+        eprintln!("Failed to run duel to completion: {e:?}");
+    }
+    IN_PROGRESS.store(false, Ordering::Release);
 
-    let reply_msg = accept_reply.message().await?;
+    Ok(())
+}
 
-    while let Some(interaction) = reply_msg
-        .await_component_interaction(ctx)
+async fn run_duel(
+    ctx: Context<'_>,
+    challenger_character: Character,
+    challenger_stats: CharacterPastStats,
+    reply_handle: ReplyHandle<'_>,
+) -> Result<()> {
+    let message = reply_handle.message().await?;
+    let Some(interaction) = find_opponent(ctx, message.id, challenger_character.user_id).await?
+    else {
+        let content = format!(
+            "No one was brave enough to do battle with **{}**",
+            challenger_character.name
+        );
+        reply_handle
+            .edit(ctx, reply_with_buttons(content, Vec::new()))
+            .await?;
+        return Ok(());
+    };
+
+    let accepter = &interaction.user;
+    let accepter_nick = nickname(&ctx, accepter).await;
+    let accepter_nick = accepter_nick.as_deref();
+
+    let accepter_character = Character::new(
+        accepter.id.get(),
+        accepter_nick.unwrap_or(&accepter.name),
+        accepter_nick,
+    );
+    let accepter_stats = retrieve_user_stats(ctx, accepter).await?;
+
+    let mut fight = RPGFight::new(challenger_character, accepter_character);
+    let fight_result = fight.fight();
+
+    let mut conn = ctx.data().database.acquire().await?;
+    let mut transaction = conn.begin().await?;
+
+    let new_challenger_elo = update_character_stats(
+        &mut transaction,
+        fight.challenger.user_id,
+        challenger_stats.elo_rank,
+        accepter_stats.elo_rank,
+        fight_result.to_score(true),
+    )
+    .await?;
+
+    let new_accepter_elo = update_character_stats(
+        &mut transaction,
+        accepter.id.get(),
+        accepter_stats.elo_rank,
+        challenger_stats.elo_rank,
+        fight_result.to_score(false),
+    )
+    .await?;
+
+    let fight_log = fight.to_string();
+    new_fight_record(&mut transaction, &message.id.to_string(), &fight_log).await?;
+
+    transaction.commit().await?;
+    update_summary_cache(ctx, message.id.get(), &fight_log).await;
+
+    let elo_change_summary = format!(
+        "**{}**{} [{new_challenger_elo}]. \
+            **{}**{} [{new_accepter_elo}].",
+        &fight.challenger.name,
+        calculate_lp_difference(challenger_stats.elo_rank, new_challenger_elo),
+        &fight.accepter.name,
+        calculate_lp_difference(accepter_stats.elo_rank, new_accepter_elo)
+    );
+
+    let final_message = format!("{}\n{}", fight.summary(), elo_change_summary);
+    let update_resp =
+        update_response(text_message(final_message).components(vec![create_summary_button()]));
+    interaction.create_response(ctx, update_resp).await?;
+
+    Ok(())
+}
+
+async fn find_opponent(
+    ctx: Context<'_>,
+    message_id: MessageId,
+    challenger_id: u64,
+) -> Result<Option<ComponentInteraction>> {
+    while let Some(interaction) = ComponentInteractionCollector::new(ctx)
+        .message_id(message_id)
+        .filter(move |f| f.data.custom_id == "rpg-btn")
         .timeout(DEAD_DUEL_COOLDOWN)
         .await
     {
-        if interaction.data.custom_id != "rpg-btn" {
-            continue;
-        }
-
-        if interaction.user.id == challenger.id {
+        if interaction.user.id == challenger_id {
             let resp = response(ephemeral_text_message("You cannot join your own fight."));
             interaction.create_response(ctx, resp).await?;
             continue;
         }
 
-        if !custom_data_lock.read().await.in_progress {
+        if !IN_PROGRESS.load(Ordering::Acquire) {
             let resp = response(ephemeral_text_message(
                 "Someone beat you to the challenge already.",
             ));
@@ -108,117 +183,21 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
             continue;
         }
 
-        let accepter = &interaction.user;
-        let accepter_nick = nickname(&ctx, accepter).await;
-        let accepter_name = accepter_nick.as_deref().unwrap_or(&challenger.name);
-
-        let accepter_stats = match retrieve_user_stats(ctx, accepter).await {
-            Ok(stats) => stats,
-            Err(e) => {
-                eprintln!("Could not retrieve {}'s stats {e:?}", accepter.name);
-                let err_message = "Something went wrong when trying to retrieve your past stats.";
-                interaction
-                    .create_response(ctx, response(ephemeral_text_message(err_message)))
-                    .await?;
-                continue;
-            }
-        };
-
-        if let Err(e) = assert_no_recent_loss(&accepter_stats, accepter_name) {
+        let accepter_stats = retrieve_user_stats(ctx, &interaction.user).await?;
+        if let Err(e) = assert_no_recent_loss(&accepter_stats) {
             interaction
                 .create_response(ctx, response(ephemeral_text_message(e.to_string())))
                 .await?;
             continue;
         }
 
-        let accepter_character =
-            Character::new(accepter.id.get(), accepter_name, &accepter_nick.as_deref());
-
-        let mut fight = RPGFight::new(challenger_character, accepter_character);
-        let fight_result = fight.fight();
-
-        update_in_progress_status(custom_data_lock, false).await;
-
-        let mut conn = ctx.data().database.acquire().await?;
-        let mut transaction = conn.begin().await?;
-
-        let new_challenger_elo = update_character_stats(
-            &mut transaction,
-            challenger.id.get(),
-            challenger_stats.elo_rank,
-            accepter_stats.elo_rank,
-            fight_result.to_score(true),
-        )
-        .await?;
-
-        let new_accepter_elo = update_character_stats(
-            &mut transaction,
-            accepter.id.get(),
-            accepter_stats.elo_rank,
-            challenger_stats.elo_rank,
-            fight_result.to_score(false),
-        )
-        .await?;
-
-        let fight_log = fight.to_string();
-        new_fight_record(
-            &mut transaction,
-            interaction.message.id.to_string(),
-            &fight_log,
-        )
-        .await?;
-
-        transaction.commit().await?;
-        update_summary_cache(ctx, reply_msg.id.get(), &fight_log).await;
-
-        let elo_change_summary = format!(
-            "**{challenger_name}**{} [{new_challenger_elo}]. \
-            **{accepter_name}**{} [{new_accepter_elo}].",
-            calculate_lp_difference(challenger_stats.elo_rank, new_challenger_elo),
-            calculate_lp_difference(accepter_stats.elo_rank, new_accepter_elo)
-        );
-
-        interaction
-            .create_response(
-                ctx,
-                update_response(
-                    text_message(format!("{}\n{}", fight.summary(), elo_change_summary))
-                        .components(vec![create_summary_button()]),
-                ),
-            )
-            .await?;
-
-        return Ok(());
+        return Ok(Some(interaction));
     }
 
-    accept_reply
-        .edit(
-            ctx,
-            reply_with_buttons(
-                format!("{challenger_name} failed to find someone to fight."),
-                Vec::new(),
-            ),
-        )
-        .await?;
-
-    update_in_progress_status(custom_data_lock, false).await;
-
-    Ok(())
+    Ok(None)
 }
 
-async fn update_in_progress_status(custom_data_lock: &RwLock<ChallengeData>, new_status: bool) {
-    let mut cmd_data = custom_data_lock.write().await;
-    cmd_data.in_progress = new_status;
-}
-
-fn unwrap_custom_data(ctx: Context<'_>) -> &RwLock<ChallengeData> {
-    ctx.command()
-        .custom_data
-        .downcast_ref::<RwLock<ChallengeData>>()
-        .expect("Expected to have passed a ChallengeData struct as custom_data")
-}
-
-fn assert_no_recent_loss(stats: &CharacterPastStats, name: &str) -> Result<()> {
+fn assert_no_recent_loss(stats: &CharacterPastStats) -> Result<()> {
     let now = Utc::now().naive_utc();
     let loss_cooldown_duration = chrono::Duration::from_std(LOSS_COOLDOWN)?;
 
@@ -227,7 +206,7 @@ fn assert_no_recent_loss(stats: &CharacterPastStats, name: &str) -> Result<()> {
             .and_utc()
             .timestamp();
 
-        bail!("{name} you have recently lost a duel. Please try again <t:{time_until_duel}:R>.");
+        bail!("You have recently lost a duel. Please try again <t:{time_until_duel}:R>.");
     }
 
     Ok(())
@@ -276,7 +255,7 @@ async fn preview(
     }
 
     let silent = silent.unwrap_or(true);
-    let character = Character::new(ctx.author().id.get(), &name, &Some(&name));
+    let character = Character::new(ctx.author().id.get(), &name, Some(&name));
     ctx.send(
         CreateReply::default()
             .embed(character.to_embed())
@@ -299,7 +278,7 @@ async fn character(
 
     let nick = nickname(&ctx, user).await;
     let name = nick.as_deref().unwrap_or(&user.name);
-    let character = Character::new(user.id.get(), name, &nick.as_deref());
+    let character = Character::new(user.id.get(), name, nick.as_deref());
 
     ctx.send(
         CreateReply::default()
@@ -492,11 +471,7 @@ async fn update_character_stats(
     Ok(new_elo)
 }
 
-async fn new_fight_record(
-    conn: &mut SqliteConnection,
-    message_id: String,
-    log: &str,
-) -> Result<()> {
+async fn new_fight_record(conn: &mut SqliteConnection, message_id: &str, log: &str) -> Result<()> {
     sqlx::query!(
         r#"INSERT INTO RPGFight (message_id, log) VALUES (?, ?)"#,
         message_id,
