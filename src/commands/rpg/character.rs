@@ -5,6 +5,7 @@ use poise::serenity_prelude::CreateEmbed;
 use rand::SeedableRng;
 use rand::{rngs::StdRng, seq::SliceRandom};
 use rand_seeder::Seeder;
+use serenity::all::User;
 
 use crate::commands::rpg::data::{CLASSES, STANDARD_SPECIES};
 use crate::common::pick_best_x_dice_rolls;
@@ -40,7 +41,11 @@ pub struct Character {
 }
 
 impl Character {
-    pub fn new(user_id: u64, name: &str, seed: Option<&str>) -> Self {
+    pub fn new(user: &User, nickname: Option<&str>) -> Self {
+        let user_id = user.id.get();
+        let seed = nickname;
+        let name = nickname.unwrap_or(&user.name);
+
         let mut rng = match seed {
             Some(s) => Seeder::from(&s).make_rng(),
             None => StdRng::seed_from_u64(rand::random::<u64>()),

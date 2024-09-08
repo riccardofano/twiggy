@@ -44,8 +44,6 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
     }
 
     let challenger = ctx.author();
-    let challenger_nick = nickname(&ctx, challenger).await;
-    let challenger_nick = challenger_nick.as_deref();
 
     let Ok(challenger_stats) = retrieve_user_stats(ctx, challenger).await else {
         return bail_reply(ctx, "Something went wrong when trying to join the fight.").await;
@@ -55,11 +53,8 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         return bail_reply(ctx, e.to_string()).await;
     };
 
-    let challenger_character = Character::new(
-        challenger.id.get(),
-        challenger_nick.unwrap_or(&challenger.name),
-        challenger_nick,
-    );
+    let challenger_nick = nickname(&ctx, challenger).await;
+    let challenger_character = Character::new(challenger, challenger_nick.as_deref());
 
     let reply_content = format!(
         "{} is throwing down the gauntlet in challenge...",
@@ -102,13 +97,7 @@ async fn run_duel(
 
     let accepter = &interaction.user;
     let accepter_nick = nickname(&ctx, accepter).await;
-    let accepter_nick = accepter_nick.as_deref();
-
-    let accepter_character = Character::new(
-        accepter.id.get(),
-        accepter_nick.unwrap_or(&accepter.name),
-        accepter_nick,
-    );
+    let accepter_character = Character::new(accepter, accepter_nick.as_deref());
     let accepter_stats = retrieve_user_stats(ctx, accepter).await?;
 
     let mut fight = RPGFight::new(challenger_character, accepter_character);
@@ -255,7 +244,7 @@ async fn preview(
     }
 
     let silent = silent.unwrap_or(true);
-    let character = Character::new(ctx.author().id.get(), &name, Some(&name));
+    let character = Character::new(ctx.author(), Some(&name));
     ctx.send(
         CreateReply::default()
             .embed(character.to_embed())
@@ -277,8 +266,7 @@ async fn character(
     let user = user.as_ref().unwrap_or_else(|| ctx.author());
 
     let nick = nickname(&ctx, user).await;
-    let name = nick.as_deref().unwrap_or(&user.name);
-    let character = Character::new(user.id.get(), name, nick.as_deref());
+    let character = Character::new(user, nick.as_deref());
 
     ctx.send(
         CreateReply::default()
