@@ -2,9 +2,10 @@ use std::collections::{hash_map::Entry, HashMap};
 
 use poise::serenity_prelude::{CreateCommand, GuildId};
 
+use super::DEFAULT_COMMANDS;
 use crate::{
     common::{bail_reply, ephemeral_reply},
-    Context, Result, DEFAULT_COMMANDS,
+    Context, Result,
 };
 
 pub type SimpleCommands = HashMap<i64, HashMap<String, String>>;
