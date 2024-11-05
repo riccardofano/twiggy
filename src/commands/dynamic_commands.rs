@@ -1,14 +1,27 @@
 use std::collections::{hash_map::Entry, HashMap};
 
-use poise::serenity_prelude::{CreateCommand, GuildId};
+use poise::serenity_prelude::{Context as SerenityContext, CreateCommand, GuildId};
+use rand::seq::IteratorRandom;
+use serenity::all::Interaction;
 
 use super::DEFAULT_COMMANDS;
 use crate::{
-    common::{bail_reply, ephemeral_reply},
-    Context, Result,
+    common::{bail_reply, ephemeral_reply, response, text_message},
+    Context, Data, Result,
 };
 
-pub type SimpleCommands = HashMap<i64, HashMap<String, String>>;
+#[derive(Debug, sqlx::Type, poise::ChoiceParameter, Clone, Copy)]
+pub enum CommandKind {
+    Static,
+    Choice,
+}
+
+pub struct CommandInfo {
+    pub kind: CommandKind,
+    pub content: String,
+}
+
+pub type SimpleCommands = HashMap<i64, HashMap<String, CommandInfo>>;
 
 #[poise::command(
     guild_only,
@@ -26,8 +39,11 @@ pub async fn add(
     ctx: Context<'_>,
     #[description = "The name of the command"] name: String,
     #[description = "What the command should say"] content: String,
+    #[description = "Whether it should just say that text or choose one of the comma separated choices"]
+    kind: Option<CommandKind>,
 ) -> Result<()> {
     let name = name.to_lowercase();
+    let kind = kind.unwrap_or(CommandKind::Static);
 
     ensure_single_word(ctx, &name).await?;
     ensure_not_default_command(ctx, &name).await?;
@@ -36,7 +52,8 @@ pub async fn add(
         .guild_id()
         .expect("Expected /commands add to be guild only.");
 
-    insert_command(ctx, &guild, &name, &content).await?;
+    let new_command = CommandInfo { kind, content };
+    insert_command(ctx, &guild, &name, new_command).await?;
     register_command(ctx, &guild, name).await?;
 
     ctx.send(ephemeral_reply("Command added")).await?;
@@ -49,13 +66,16 @@ pub async fn edit(
     ctx: Context<'_>,
     #[description = "The name of the command"] name: String,
     #[description = "What the command should say"] content: String,
+    #[description = "Whether it should just say that text or choose one of the comma separated choices"]
+    kind: CommandKind,
 ) -> Result<()> {
     let name = name.to_lowercase();
     let guild = ctx
         .guild_id()
         .expect("Expected /commands edit to be guild only.");
 
-    update_command(ctx, &guild, &name, &content).await?;
+    let updated_command = CommandInfo { kind, content };
+    update_command(ctx, &guild, &name, updated_command).await?;
     ctx.send(ephemeral_reply("The command has been updated."))
         .await?;
 
@@ -85,7 +105,7 @@ async fn insert_command(
     ctx: Context<'_>,
     guild_id: &GuildId,
     name: &str,
-    content: &str,
+    new_command: CommandInfo,
 ) -> Result<()> {
     let data = ctx.data();
     let mut map = data.simple_commands.write().await;
@@ -97,16 +117,19 @@ async fn insert_command(
         return bail_reply(ctx, "The command already exists.").await;
     };
 
+    let content = &new_command.content;
+    let kind = new_command.kind;
     sqlx::query!(
-        "INSERT INTO SimpleCommands (guild_id, name, content) VALUES (?, ?, ?)",
+        "INSERT INTO SimpleCommands (guild_id, name, kind, content) VALUES (?, ?, ?, ?)",
         guild_id,
         name,
+        kind,
         content
     )
     .execute(&data.database)
     .await?;
 
-    entry.insert(content.to_owned());
+    entry.insert(new_command);
 
     Ok(())
 }
@@ -114,7 +137,7 @@ async fn update_command(
     ctx: Context<'_>,
     guild_id: &GuildId,
     name: &str,
-    content: &str,
+    command: CommandInfo,
 ) -> Result<()> {
     let data = ctx.data();
     let mut map = data.simple_commands.write().await;
@@ -127,16 +150,19 @@ async fn update_command(
         return bail_reply(ctx, "The command does not exist.").await;
     };
 
+    let content = &command.content;
+    let kind = &command.kind;
     sqlx::query!(
-        "UPDATE OR IGNORE SimpleCommands SET content = ? WHERE guild_id = ? AND name = ?",
+        "UPDATE OR IGNORE SimpleCommands SET kind = ?, content = ? WHERE guild_id = ? AND name = ?",
         guild_id,
+        kind,
         content,
         name
     )
     .execute(&data.database)
     .await?;
 
-    content.clone_into(entry);
+    *entry = command;
 
     Ok(())
 }
@@ -212,4 +238,48 @@ async fn ensure_single_word(ctx: Context<'_>, name: &str) -> Result<()> {
     };
 
     Ok(())
+}
+
+pub async fn try_intercepting_command_call(
+    ctx: &SerenityContext,
+    user_data: &Data,
+    interaction: &Interaction,
+) -> Result<()> {
+    let interaction = interaction.clone();
+
+    let Some(command) = interaction.command() else {
+        return Ok(());
+    };
+
+    let map = user_data.simple_commands.read().await;
+    let Some(guild_id) = command.guild_id else {
+        return Ok(());
+    };
+    let Some(guild_commands) = map.get(&(guild_id.get() as i64)) else {
+        return Ok(());
+    };
+
+    if let Some(dynamic_command) = guild_commands.get(&command.data.name) {
+        let text = respond_to_command_call(dynamic_command);
+        command
+            .create_response(ctx, response(text_message(text)))
+            .await?;
+    };
+
+    Ok(())
+}
+
+fn respond_to_command_call(dynamic_command: &CommandInfo) -> String {
+    match dynamic_command.kind {
+        CommandKind::Static => dynamic_command.content.clone(),
+        CommandKind::Choice => {
+            let mut rng = rand::thread_rng();
+            dynamic_command
+                .content
+                .split('|')
+                .choose(&mut rng)
+                .unwrap()
+                .to_string()
+        }
+    }
 }

@@ -4,7 +4,6 @@ mod common;
 use std::num::NonZeroUsize;
 
 use anyhow::Result;
-use common::{response, text_message};
 use lru::LruCache;
 use poise::serenity_prelude::{self as serenity, FullEvent};
 use tokio::sync::{Mutex, RwLock};
@@ -106,24 +105,7 @@ async fn event_event_handler<'a>(
             commands::setup_collectors(ctx, user_data).await;
         }
         FullEvent::InteractionCreate { interaction } => {
-            let interaction = interaction.clone();
-            let Some(command) = interaction.command() else {
-                return Ok(());
-            };
-
-            let map = user_data.simple_commands.read().await;
-            let Some(guild_id) = command.guild_id else {
-                return Ok(());
-            };
-            let Some(guild_commands) = map.get(&(guild_id.get() as i64)) else {
-                return Ok(());
-            };
-
-            if let Some(text) = guild_commands.get(&command.data.name) {
-                command
-                    .create_response(ctx, response(text_message(text)))
-                    .await?;
-            };
+            commands::try_intercepting_command_call(ctx, user_data, interaction).await?;
         }
         _ => {}
     }

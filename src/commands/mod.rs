@@ -12,11 +12,12 @@ mod rpg;
 mod sudoku;
 
 use crate::{Data, Error};
+use dynamic_commands::CommandInfo;
 use poise::serenity_prelude::{all::CreateCommand, Context as SerenityContext};
 use poise::Command;
 use std::{collections::HashMap, sync::OnceLock};
 
-pub use dynamic_commands::SimpleCommands;
+pub use dynamic_commands::{try_intercepting_command_call, CommandKind, SimpleCommands};
 
 pub static DEFAULT_COMMANDS: OnceLock<Vec<String>> = OnceLock::new();
 
@@ -75,23 +76,27 @@ pub fn get_commands() -> Vec<Command<Data, Error>> {
 struct GuildCommand {
     guild_id: i64,
     name: String,
+    kind: CommandKind,
     content: String,
 }
 
-async fn fetch_guild_commands(
-    user_data: &Data,
-) -> anyhow::Result<HashMap<i64, HashMap<String, String>>> {
+async fn fetch_guild_commands(user_data: &Data) -> anyhow::Result<SimpleCommands> {
     let guild_commands = sqlx::query_as!(
         GuildCommand,
-        "SELECT guild_id, name, content FROM SimpleCommands"
+        r#"SELECT guild_id, name, kind as "kind: CommandKind", content FROM SimpleCommands"#
     )
     .fetch_all(&user_data.database)
     .await?;
 
-    let mut commands_map: HashMap<i64, HashMap<String, String>> = HashMap::new();
+    let mut commands_map: SimpleCommands = HashMap::new();
     for command in guild_commands {
         let entry = commands_map.entry(command.guild_id).or_default();
-        entry.insert(command.name, command.content);
+        let info = CommandInfo {
+            kind: command.kind,
+            content: command.content,
+        };
+
+        entry.insert(command.name, info);
     }
 
     Ok(commands_map)

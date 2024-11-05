@@ -2,6 +2,7 @@
 CREATE TABLE SimpleCommands (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
+    kind INTEGER NOT NULL,
     content TEXT NOT NULL,
     guild_id INTEGER NOT NULL
 );
