@@ -84,14 +84,12 @@ async fn run_duel(
         Ordering::Greater => {
             let (winner_id, loser_id) = (&challenger.string_id, &accepter.string_id);
             update_users_win_loss(&mut transaction, winner_id, loser_id).await?;
-            update_last_loss(&mut transaction, &accepter.string_id).await?;
 
             format!("{challenger} has won!")
         }
         Ordering::Less => {
             let (winner_id, loser_id) = (&accepter.string_id, &challenger.string_id);
             update_users_win_loss(&mut transaction, winner_id, loser_id).await?;
-            update_last_loss(&mut transaction, loser_id).await?;
 
             format!("{accepter} has won!")
         }
@@ -208,19 +206,6 @@ async fn get_last_loss(executor: impl SqliteExecutor<'_>, user_id: &str) -> Resu
     .with_context(|| format!("Failed to get {user_id}'s last loss"))?;
 
     Ok(row.last_loss)
-}
-
-async fn update_last_loss(executor: impl SqliteExecutor<'_>, user_id: &str) -> Result<()> {
-    sqlx::query!(
-        r#"INSERT INTO User (id, last_loss) VALUES (?, datetime('now'))
-        ON CONFLICT(id) DO UPDATE SET last_loss = datetime('now')"#,
-        user_id
-    )
-    .execute(executor)
-    .await
-    .with_context(|| format!("Failed to update {user_id}'s last loss"))?;
-
-    Ok(())
 }
 
 async fn update_users_win_loss(
