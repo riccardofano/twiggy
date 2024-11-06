@@ -1077,7 +1077,9 @@ async fn send_dino_embed(
         ))
         .footer(CreateEmbedFooter::new(format!(
             "{} is worth {} Dino Bucks!\nHotness Rating: {}",
-            &dino.name, dino.worth, dino.hotness
+            &dino.name,
+            dino.worth,
+            quirkify_hotness(dino.hotness)
         )))
         .attachment(image_name);
 
@@ -1234,4 +1236,8 @@ async fn unwrap_fragments(ctx: Context<'_>) -> &RwLock<Fragments> {
         .custom_data
         .downcast_ref::<RwLock<Fragments>>()
         .expect("Expected to have passed a Fragments struct as custom_data")
+}
+
+pub fn quirkify_hotness(hotness: i64) -> String {
+    format!("{:.3}", f64::tanh(hotness as f64 * 0.1))
 }

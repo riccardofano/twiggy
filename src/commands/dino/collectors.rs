@@ -14,6 +14,8 @@ use crate::common::{embed_message, ephemeral_text_message, response, update_resp
 use crate::Data;
 use crate::Result;
 
+use super::quirkify_hotness;
+
 enum TransactionType {
     Covet,
     Shun,
@@ -119,7 +121,8 @@ async fn handle_dino_collector(
             CreateEmbed::from(old_embed)
                 .title(&dino_name)
                 .footer(CreateEmbedFooter::new(format!(
-                    "{dino_name} is worth {worth} Dino Bucks!\nHotness Rating: {hotness}"
+                    "{dino_name} is worth {worth} Dino Bucks!\nHotness Rating: {}",
+                    quirkify_hotness(hotness)
                 )));
 
         interaction
@@ -234,7 +237,10 @@ async fn calculate_dino_score(conn: &mut SqliteConnection, dino_id: i64) -> Resu
         total_transactions += entry.count;
     }
 
-    let hotness = map.get("COVET").unwrap_or(&0) - map.get("SHUN").unwrap_or(&0);
+    let covets = map.get("COVET").copied().unwrap_or_default();
+    let shuns = map.get("SHUN").copied().unwrap_or_default();
+    let hotness = covets - shuns;
+
     update_dino_score(conn, dino_id, total_transactions, hotness).await?;
 
     Ok((total_transactions, hotness))
