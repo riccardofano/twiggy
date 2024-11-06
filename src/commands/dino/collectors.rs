@@ -43,21 +43,17 @@ impl Display for TransactionType {
 }
 
 pub async fn setup_dino_collector(ctx: &serenity::Context, user_data: &Data) -> Result<()> {
-    let collector = ComponentInteractionCollector::new(ctx)
+    let mut collector = ComponentInteractionCollector::new(ctx)
         .filter(|f| f.data.custom_id.starts_with("dino-"))
         .stream();
+
     println!("Setup dino collector");
 
-    let _: Vec<_> = collector
-        .then(|interaction| async move {
-            if let Err(e) = handle_dino_collector(ctx, user_data, &interaction).await {
-                eprintln!("Error while handling dino collection: {e}");
-            }
-
-            interaction
-        })
-        .collect()
-        .await;
+    while let Some(interaction) = collector.next().await {
+        if let Err(e) = handle_dino_collector(ctx, user_data, &interaction).await {
+            eprintln!("Error while handling dino collection: {e}");
+        }
+    }
 
     Ok(())
 }
