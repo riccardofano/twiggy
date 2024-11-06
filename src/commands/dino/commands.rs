@@ -10,10 +10,11 @@ use rand::{seq::SliceRandom, thread_rng};
 use sqlx::error::DatabaseError;
 use sqlx::sqlite::SqliteError;
 use sqlx::{FromRow, QueryBuilder, Row, Sqlite, SqliteExecutor, SqlitePool};
+
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use tokio::sync::{RwLock, RwLockReadGuard};
+use std::sync::OnceLock;
 
 use crate::common::{bail_reply, embed_message, ephemeral_text_message, response};
 use crate::{
@@ -21,7 +22,7 @@ use crate::{
     Context, Result, SUB_ROLE_ID,
 };
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct Fragments {
     bodies: Vec<PathBuf>,
     mouths: Vec<PathBuf>,
@@ -39,6 +40,8 @@ struct DinoParts {
 const FRAGMENT_PATH: &str = "./assets/dino/fragments";
 const OUTPUT_PATH: &str = "./assets/dino/complete";
 
+static DINO_FRAGMENTS: OnceLock<Fragments> = OnceLock::new();
+
 const DINO_IMAGE_SIZE: u32 = 112;
 const COLUMN_MARGIN: u32 = 2;
 const ROW_MARGIN: u32 = 2;
@@ -55,13 +58,16 @@ pub const COVET_BUTTON: &str = "dino-covet";
 pub const SHUN_BUTTON: &str = "dino-shun";
 pub const FAVOURITE_BUTTON: &str = "dino-favourite";
 
-fn setup_dinos() -> RwLock<Fragments> {
+pub fn setup_dinos() {
     let fragments_dir = std::fs::read_dir(FRAGMENT_PATH).expect("Could not read fragment path");
 
     let mut fragments = Fragments::default();
 
     for entry in fragments_dir {
-        let entry = entry.expect("Could not read entry");
+        let Ok(entry) = entry else {
+            continue;
+        };
+
         if !entry.metadata().expect("Could not read metadata").is_file() {
             continue;
         }
@@ -76,14 +82,13 @@ fn setup_dinos() -> RwLock<Fragments> {
         }
     }
 
-    RwLock::new(fragments)
+    DINO_FRAGMENTS.set(fragments).unwrap();
 }
 
 #[poise::command(
     slash_command,
     guild_only,
-    subcommands("hatch", "collection", "rename", "view", "gift", "slurp", "slurpening"),
-    custom_data = "setup_dinos()"
+    subcommands("hatch", "collection", "rename", "view", "gift", "slurp", "slurpening")
 )]
 pub async fn dino(_ctx: Context<'_>) -> Result<()> {
     Ok(())
@@ -200,8 +205,7 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
         return Ok(());
     }
 
-    let fragments = unwrap_fragments(ctx).await.read().await;
-    let Some(parts) = generate_dino(db, &fragments).await? else {
+    let Some(parts) = generate_dino(db).await? else {
         let msg =
             "I tried really hard but i wasn't able to make a unique dino for you. Sorry... :'(";
         return bail_reply(ctx, msg).await;
@@ -459,9 +463,8 @@ async fn slurp(
             format!("Doesn't seem you own {second}, are you trying to pull a fast one on me?!");
         return bail_reply(ctx, msg).await;
     }
-    let fragments = unwrap_fragments(ctx).await.read().await;
-    let parts = generate_dino(&ctx.data().database, &fragments).await?;
 
+    let parts = generate_dino(&ctx.data().database).await?;
     if parts.is_none() {
         let msg =
             "I tried really hard but i wasn't able to make a unique dino for you. Sorry... :'(";
@@ -558,7 +561,6 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
             continue;
         }
 
-        let fragments = unwrap_fragments(ctx).await.read().await;
         let mut transaction = ctx.data().database.begin().await?;
 
         for dino in sacrifices.iter() {
@@ -569,7 +571,7 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
 
         let mut created_dinos = Vec::with_capacity(num_to_create);
         for _ in 0..num_to_create {
-            let Some(parts) = generate_dino(&ctx.data().database, &fragments).await? else {
+            let Some(parts) = generate_dino(&ctx.data().database).await? else {
                 interaction
                     .create_response(
                         ctx,
@@ -670,11 +672,10 @@ async fn update_last_user_action(
     Ok(())
 }
 
-async fn generate_dino(
-    executor: impl SqliteExecutor<'_> + Copy,
-    fragments: &RwLockReadGuard<'_, Fragments>,
-) -> Result<Option<DinoParts>> {
+async fn generate_dino(executor: impl SqliteExecutor<'_> + Copy) -> Result<Option<DinoParts>> {
     let mut tries = 0;
+
+    let fragments = DINO_FRAGMENTS.get().unwrap();
 
     loop {
         let mut generated = choose_parts(fragments);
@@ -1233,13 +1234,6 @@ async fn try_hatching(
     Ok(())
 }
 
-async fn unwrap_fragments(ctx: Context<'_>) -> &RwLock<Fragments> {
-    ctx.parent_commands()[0]
-        .custom_data
-        .downcast_ref::<RwLock<Fragments>>()
-        .expect("Expected to have passed a Fragments struct as custom_data")
-}
-
 // https://github.com/Brexbot/TwiggyBot/blob/main/src/commands/NFD.ts#L1653
 pub fn quirkify_hotness(hotness: i64) -> String {
     format!("{:.3}", f64::tanh(hotness as f64 * 0.1))
@@ -1248,9 +1242,8 @@ pub fn quirkify_hotness(hotness: i64) -> String {
 // https://github.com/Brexbot/TwiggyBot/blob/main/src/commands/NFD.ts#L1156
 pub fn quirkify_worth(previous_owners: i64) -> String {
     let quirkyness = rand::random::<f64>();
-    let exponent = f64::tanh(
-        (dbg!(previous_owners) as f64 - 1.0 + dbg!(quirkyness)) / MAX_DINO_WORTH_EXPONENT,
-    ) * MAX_DINO_WORTH_EXPONENT;
+    let exponent = f64::tanh((previous_owners as f64 - 1.0 + quirkyness) / MAX_DINO_WORTH_EXPONENT)
+        * MAX_DINO_WORTH_EXPONENT;
 
     format!("{:.3}", 2.0_f64.powf(exponent))
 }

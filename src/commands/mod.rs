@@ -22,6 +22,7 @@ pub use dynamic_commands::{try_intercepting_command_call, CommandKind, SimpleCom
 pub static DEFAULT_COMMANDS: OnceLock<Vec<String>> = OnceLock::new();
 
 pub async fn initialize_commands(database: &sqlx::SqlitePool) {
+    dino::setup_dinos();
     mixu::set_initial_best_mixu_score(database)
         .await
         .expect("Unable to set best mixu score");
