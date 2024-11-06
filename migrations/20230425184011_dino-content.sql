@@ -6,7 +6,7 @@ CREATE TABLE Dino (
     hatch_message TEXT NOT NULL DEFAULT '',
     created_at DATETIME NOT NULL,
 
-    worth INTEGER NOT NULL DEFAULT 1,
+    owners INTEGER NOT NULL DEFAULT 1,
     hotness INTEGER NOT NULL DEFAULT 0,
 
     body TEXT NOT NULL,

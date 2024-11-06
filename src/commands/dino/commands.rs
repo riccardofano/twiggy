@@ -46,6 +46,7 @@ const ROW_MARGIN: u32 = 2;
 const MAX_GENERATION_ATTEMPTS: usize = 20;
 const MAX_FAILED_HATCHES: i64 = 3;
 const HATCH_FAILS_TEXT: &[&str; 3] = &["1st", "2nd", "3rd"];
+const MAX_DINO_WORTH_EXPONENT: f64 = 30.0;
 
 // const GIFTING_COOLDOWN: Duration = Duration::from_secs(60 * 60);
 // const SLURP_COOLDOWN: Duration = Duration::from_secs(60 * 60);
@@ -911,7 +912,8 @@ struct DinoRecord {
     name: String,
     hatch_message: String,
     created_at: NaiveDateTime,
-    worth: i64,
+
+    owners: i64,
     hotness: i64,
 
     filename: String,
@@ -1078,7 +1080,7 @@ async fn send_dino_embed(
         .footer(CreateEmbedFooter::new(format!(
             "{} is worth {} Dino Bucks!\nHotness Rating: {}",
             &dino.name,
-            dino.worth,
+            quirkify_worth(dino.owners),
             quirkify_hotness(dino.hotness)
         )))
         .attachment(image_name);
@@ -1107,7 +1109,7 @@ async fn gift_dino(
         r#"INSERT OR IGNORE INTO DinoUser (id) VALUES (?);
         INSERT INTO DinoTransactions (dino_id, user_id, gifter_id, type)
         VALUES (?, ?, ?, 'GIFT');
-        UPDATE Dino SET owner_id = ? WHERE id = ?"#,
+        UPDATE Dino SET owner_id = ?, owners = owners + 1 WHERE id = ?"#,
         recipient_id,
         dino_id,
         recipient_id,
@@ -1238,6 +1240,17 @@ async fn unwrap_fragments(ctx: Context<'_>) -> &RwLock<Fragments> {
         .expect("Expected to have passed a Fragments struct as custom_data")
 }
 
+// https://github.com/Brexbot/TwiggyBot/blob/main/src/commands/NFD.ts#L1653
 pub fn quirkify_hotness(hotness: i64) -> String {
     format!("{:.3}", f64::tanh(hotness as f64 * 0.1))
+}
+
+// https://github.com/Brexbot/TwiggyBot/blob/main/src/commands/NFD.ts#L1156
+pub fn quirkify_worth(previous_owners: i64) -> String {
+    let quirkyness = rand::random::<f64>();
+    let exponent = f64::tanh(
+        (dbg!(previous_owners) as f64 - 1.0 + dbg!(quirkyness)) / MAX_DINO_WORTH_EXPONENT,
+    ) * MAX_DINO_WORTH_EXPONENT;
+
+    format!("{:.3}", 2.0_f64.powf(exponent))
 }

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fmt::Display;
 
 use anyhow::bail;
@@ -14,7 +13,7 @@ use crate::common::{embed_message, ephemeral_text_message, response, update_resp
 use crate::Data;
 use crate::Result;
 
-use super::quirkify_hotness;
+use super::{quirkify_hotness, quirkify_worth};
 
 enum TransactionType {
     Covet,
@@ -84,7 +83,7 @@ async fn handle_dino_collector(
     let mut transaction = user_data.database.begin().await?;
     let dino = fetch_dino_names(&mut transaction, dino_id).await?;
 
-    if dino.is_none() {
+    let Some((dino_name, _dino_image_name)) = dino else {
         let old_embed = interaction.message.embeds[0].clone();
 
         let dino_name = &old_embed.title.as_deref().unwrap_or("Unknown dino");
@@ -94,9 +93,7 @@ async fn handle_dino_collector(
         let resp = update_response(embed_message(new_embed).components(Vec::new()));
         interaction.create_response(ctx, resp).await?;
         return Ok(());
-    }
-
-    let (dino_name, _dino_image_name) = dino.unwrap();
+    };
 
     let button_type = match &custom_id {
         b if b.starts_with(COVET_BUTTON) => TransactionType::Covet,
@@ -113,7 +110,7 @@ async fn handle_dino_collector(
             .create_response(ctx, response(ephemeral_text_message(&content)))
             .await?;
     } else {
-        let (worth, hotness) = calculate_dino_score(&mut transaction, dino_id).await?;
+        let (gifts, hotness) = calculate_dino_score(&mut transaction, dino_id).await?;
 
         // NOTE NOTE: You don't need to update the attachment anymore.
         let old_embed = interaction.message.embeds[0].clone();
@@ -121,7 +118,8 @@ async fn handle_dino_collector(
             CreateEmbed::from(old_embed)
                 .title(&dino_name)
                 .footer(CreateEmbedFooter::new(format!(
-                    "{dino_name} is worth {worth} Dino Bucks!\nHotness Rating: {}",
+                    "{dino_name} is worth {} Dino Bucks!\nHotness Rating: {}",
+                    quirkify_worth(gifts + 1), // +1 because the hatcher is also an owner
                     quirkify_hotness(hotness)
                 )));
 
@@ -230,36 +228,29 @@ async fn calculate_dino_score(conn: &mut SqliteConnection, dino_id: i64) -> Resu
     .fetch_all(&mut *conn)
     .await?;
 
-    let mut map = HashMap::new();
-    let mut total_transactions = 0;
+    let mut covets = 0;
+    let mut shuns = 0;
+    let mut gifts = 0; // gifts *should* be synced with the amount of owners a dino has had
+
     for entry in row.into_iter() {
-        map.insert(entry.type_, entry.count);
-        total_transactions += entry.count;
+        match entry.type_.as_ref() {
+            "COVET" => covets += entry.count,
+            "SHUN" => shuns += entry.count,
+            "GIFT" => gifts += entry.count,
+            _ => {}
+        }
     }
 
-    let covets = map.get("COVET").copied().unwrap_or_default();
-    let shuns = map.get("SHUN").copied().unwrap_or_default();
     let hotness = covets - shuns;
+    update_dino_score(conn, dino_id, hotness).await?;
 
-    update_dino_score(conn, dino_id, total_transactions, hotness).await?;
-
-    Ok((total_transactions, hotness))
+    Ok((gifts, hotness))
 }
 
-async fn update_dino_score(
-    conn: &mut SqliteConnection,
-    dino_id: i64,
-    worth: i64,
-    hotness: i64,
-) -> Result<()> {
-    sqlx::query!(
-        "UPDATE Dino SET worth = ?, hotness = ? WHERE id = ?",
-        worth,
-        hotness,
-        dino_id
-    )
-    .execute(conn)
-    .await?;
+async fn update_dino_score(conn: &mut SqliteConnection, dino_id: i64, hotness: i64) -> Result<()> {
+    sqlx::query!("UPDATE Dino SET hotness = ? WHERE id = ?", hotness, dino_id)
+        .execute(conn)
+        .await?;
 
     Ok(())
 }
