@@ -1,5 +1,6 @@
 mod commands;
 mod common;
+mod core;
 
 use std::num::NonZeroUsize;
 
