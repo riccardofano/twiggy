@@ -525,7 +525,7 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
     let num_to_create = num_to_sacrifice / 2;
     let dinos_at_risk: String = sacrifices
         .iter()
-        .map(|d| d.name.as_ref())
+        .map(|d| -> &str { d.name.as_ref() })
         .collect::<Vec<_>>()
         .join(", ");
 
@@ -603,7 +603,7 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
 
         let new_dino_names = created_dinos
             .iter()
-            .map(|d| d.name.as_ref())
+            .map(|d| -> &str { d.name.as_ref() })
             .collect::<Vec<_>>()
             .join(", ");
         let embed = CreateEmbed::default()

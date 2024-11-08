@@ -12,14 +12,14 @@ pub struct MockMember;
 pub struct MockReplyHandle;
 pub struct MockCollector;
 
-#[mockall::automock(
+#[cfg_attr(test, mockall::automock(
     type Data=crate::Data;
     type Database=Pool<Sqlite>;
     type User=MockUser;
     type Member=MockMember;
     type ReplyHandle=MockReplyHandle;
     type Collector=MockCollector;
-)]
+))]
 pub trait CoreContext {
     type Data;
     type User;
