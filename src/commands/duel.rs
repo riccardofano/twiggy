@@ -2,6 +2,7 @@ use crate::common::{
     avatar_url, bail_reply, colour, ephemeral_text_message, name, reply_with_buttons, response,
     text_message, update_response,
 };
+use crate::core::CoreContext;
 use crate::Context as DiscordContext;
 
 use anyhow::{bail, Context, Result};
@@ -160,15 +161,21 @@ async fn find_opponent(
 /// Display your duel statistics
 #[poise::command(slash_command)]
 pub async fn duelstats(ctx: DiscordContext<'_>) -> Result<()> {
+    duelstats_impl(ctx).await
+}
+async fn duelstats_impl(ctx: impl CoreContext) -> Result<()> {
     let user = ctx.author();
-    let conn = &mut ctx.data().database.acquire().await?;
+    let conn = &mut ctx.acquire_db_connection().await?;
 
-    let Some(stats) = get_duel_stats(conn, user.id.to_string()).await? else {
-        return bail_reply(ctx, "You have never dueled before.").await;
+    let Some(stats) = get_duel_stats(conn, ctx.user_id(user).to_string()).await? else {
+        return ctx.bail("You have never dueled before.".to_string()).await;
     };
 
-    let name = name(&ctx, user).await;
-    let colour = colour(&ctx).await.unwrap_or_else(|| 0x77618F.into());
+    let name = ctx.user_name(user).await;
+    let colour = ctx
+        .user_colour(user)
+        .await
+        .unwrap_or_else(|| 0x77618F.into());
     let embed = CreateEmbed::default()
         .colour(colour)
         .description(format!(
@@ -182,12 +189,10 @@ pub async fn duelstats(ctx: DiscordContext<'_>) -> Result<()> {
                 "{name}'s scoresheet: {}-{}-{}",
                 stats.wins, stats.losses, stats.draws
             ))
-            .icon_url(avatar_url(user)),
+            .icon_url(ctx.user_avatar_url(user)),
         );
 
-    ctx.send(CreateReply::default().embed(embed)).await?;
-
-    Ok(())
+    ctx.reply(CreateReply::default().embed(embed)).await
 }
 
 async fn get_last_loss(executor: impl SqliteExecutor<'_>, user_id: &str) -> Result<NaiveDateTime> {
