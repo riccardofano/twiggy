@@ -166,31 +166,15 @@ pub async fn duelstats(ctx: DiscordContext<'_>) -> Result<()> {
 async fn duelstats_impl(ctx: impl CoreContext) -> Result<()> {
     let user = ctx.author();
     let conn = &mut ctx.acquire_db_connection().await?;
-
-    let Some(stats) = get_duel_stats(conn, ctx.user_id(user).to_string()).await? else {
+    let user_id = ctx.user_id(user);
+    let Some(stats) = DuelStats::from_database(conn, user_id).await? else {
         return ctx.bail("You have never dueled before.".to_string()).await;
     };
 
-    let name = ctx.user_name(user).await;
-    let colour = ctx
-        .user_colour(user)
-        .await
-        .unwrap_or_else(|| 0x77618F.into());
-    let embed = CreateEmbed::default()
-        .colour(colour)
-        .description(format!(
-            "{}\n{}\n{}",
-            stats.current_streak(),
-            stats.best_streak(),
-            stats.worst_streak()
-        ))
-        .author(
-            CreateEmbedAuthor::new(format!(
-                "{name}'s scoresheet: {}-{}-{}",
-                stats.wins, stats.losses, stats.draws
-            ))
-            .icon_url(ctx.user_avatar_url(user)),
-        );
+    let user_name = ctx.user_name(user).await;
+    let user_colour = ctx.user_colour(user).await;
+    let user_avatar_url = ctx.user_avatar_url(user);
+    let embed = stats.embed(&user_name, user_colour, &user_avatar_url);
 
     ctx.reply(CreateReply::default().embed(embed)).await
 }
@@ -263,6 +247,7 @@ async fn update_users_drawn(
     Ok(())
 }
 
+#[derive(Debug, Default)]
 struct DuelStats {
     #[allow(dead_code)]
     user_id: String,
@@ -286,29 +271,23 @@ impl DuelStats {
         }
     }
 
-    fn best_streak(&self) -> String {
-        format!("Best streak: **{} wins**", self.win_streak_max)
+    fn embed(&self, user_name: &str, user_colour: Option<Colour>, avatar_url: &str) -> CreateEmbed {
+        CreateEmbed::default()
+            .colour(user_colour.unwrap_or_else(|| 0x77618F.into()))
+            .description(format!(
+                "{}\nBest streak: **{} wins**\nWorst streak: **{} losses**",
+                self.current_streak(),
+                self.win_streak_max,
+                self.loss_streak_max
+            ))
+            .author(
+                CreateEmbedAuthor::new(format!(
+                    "{user_name}'s scoresheet: {}-{}-{}",
+                    self.wins, self.losses, self.draws
+                ))
+                .icon_url(avatar_url),
+            )
     }
-
-    fn worst_streak(&self) -> String {
-        format!("Worst streak: **{} losses**", self.loss_streak_max)
-    }
-}
-
-async fn get_duel_stats(
-    executor: impl SqliteExecutor<'_>,
-    user_id: String,
-) -> Result<Option<DuelStats>> {
-    let stats = sqlx::query_as!(
-        DuelStats,
-        r#"SELECT * FROM DuelStats WHERE user_id = ?"#,
-        user_id
-    )
-    .fetch_optional(executor)
-    .await
-    .with_context(|| format!("Failed to get {user_id}'s duel stats"))?;
-
-    Ok(stats)
 }
 
 async fn timeout_user(ctx: Context<'_>, member: Option<Member>, until: DateTime<Utc>) {
@@ -380,4 +359,22 @@ impl Display for DuelUser {
 fn pick_scores() -> (usize, usize) {
     let mut rng = rand::thread_rng();
     (rng.gen_range(0..=100), rng.gen_range(0..=100))
+}
+
+#[cfg(test)]
+mod tests {
+    use serenity::all::Colour;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn duelstats_embed_zeroed_stats() {
+        let stats = DuelStats::default();
+
+        insta::assert_debug_snapshot!(stats.embed(
+            "cool_user",
+            Some(Colour(0x00FF00)),
+            "https:://google.com",
+        ))
+    }
 }
