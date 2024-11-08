@@ -1,6 +1,6 @@
 use crate::common::{
-    avatar_url, bail_reply, colour, ephemeral_text_message, name, reply_with_buttons, response,
-    text_message, update_response,
+    bail_reply, ephemeral_text_message, name, reply_with_buttons, response, text_message,
+    update_response,
 };
 use crate::core::CoreContext;
 use crate::Context as DiscordContext;
@@ -13,7 +13,7 @@ use poise::serenity_prelude::{
 };
 use poise::{CreateReply, ReplyHandle};
 use rand::Rng;
-use serenity::all::{ComponentInteraction, ComponentInteractionCollector, MessageId};
+use serenity::all::{Colour, ComponentInteraction, ComponentInteractionCollector, MessageId};
 use sqlx::{Connection, SqliteExecutor, Transaction};
 use std::cmp::Ordering;
 use std::fmt::Display;
@@ -261,6 +261,23 @@ struct DuelStats {
 }
 
 impl DuelStats {
+    async fn from_database(
+        executor: impl SqliteExecutor<'_>,
+        user_id: UserId,
+    ) -> Result<Option<Self>> {
+        let user_id = user_id.to_string();
+        let stats = sqlx::query_as!(
+            DuelStats,
+            r#"SELECT * FROM DuelStats WHERE user_id = ?"#,
+            user_id
+        )
+        .fetch_optional(executor)
+        .await
+        .with_context(|| format!("Failed to get {user_id}'s duel stats"))?;
+
+        Ok(stats)
+    }
+
     fn current_streak(&self) -> String {
         match (self.win_streak, self.loss_streak, self.draws) {
             (0, 0, 0) => "You have never dueled before".to_string(),
