@@ -1,5 +1,6 @@
 mod commands;
 mod common;
+mod events;
 
 use std::num::NonZeroUsize;
 
@@ -111,6 +112,14 @@ async fn event_event_handler<'a>(
             println!("{} is connected!", data_about_bot.user.name);
             commands::register_dynamic_commands_for_every_guild(ctx, user_data).await;
             commands::setup_collectors(ctx, user_data).await;
+        }
+        FullEvent::Message { new_message } => {
+            if let Some(reply) = events::blob::try_saying_hi(
+                new_message.author.id,
+                new_message.timestamp.unix_timestamp(),
+            ) {
+                new_message.reply(ctx, reply).await?;
+            }
         }
         FullEvent::InteractionCreate { interaction } => {
             commands::try_intercepting_command_call(ctx, user_data, interaction).await?;
