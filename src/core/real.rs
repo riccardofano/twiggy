@@ -81,7 +81,10 @@ impl<'a> CoreContext for poise::Context<'a, crate::Data, crate::Error> {
         interaction: Self::Interaction,
         builder: CreateInteractionResponse,
     ) -> Result<()> {
-        todo!();
+        interaction
+            .create_response(self, builder)
+            .await
+            .context("Failed to respond to interaction")
     }
     async fn timeout(&self, member: Option<Self::Member>, until: DateTime<Utc>) {
         if let Some(mut member) = member {

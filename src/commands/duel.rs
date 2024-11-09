@@ -4,15 +4,15 @@ use crate::common::{
 use crate::core::{CoreCollector, CoreContext, CoreInteraction, CoreReplyHandle};
 use crate::Context as DiscordContext;
 
-use anyhow::{bail, Context as AnyhowContext, Result};
-use chrono::{DateTime, NaiveDateTime, Utc};
+use anyhow::{bail, Context, Result};
+use chrono::{NaiveDateTime, Utc};
 use poise::futures_util::StreamExt;
 use poise::serenity_prelude::{
-    ButtonStyle, CreateActionRow, CreateButton, CreateEmbed, CreateEmbedAuthor, Member, UserId,
+    ButtonStyle, CreateActionRow, CreateButton, CreateEmbed, CreateEmbedAuthor, UserId,
 };
 use poise::CreateReply;
 use rand::Rng;
-use serenity::all::{Colour, CreateInteractionResponse, MessageId};
+use serenity::all::{Colour, MessageId};
 use sqlx::{Connection, SqliteExecutor, Transaction};
 use std::cmp::Ordering;
 use std::fmt::Display;
@@ -32,7 +32,7 @@ pub async fn duel(ctx: DiscordContext<'_>) -> Result<()> {
     duel_impl(ctx, &IN_PROGRESS).await
 }
 async fn duel_impl(ctx: impl CoreContext, in_progress: &AtomicBool) -> Result<()> {
-    let challenger = match find_challenger(ctx, in_progress).await {
+    let challenger = match find_challenger(&ctx, in_progress).await {
         Ok(challenger) => challenger,
         Err(e) => return ctx.bail(e.to_string()).await,
     };
@@ -44,9 +44,9 @@ async fn duel_impl(ctx: impl CoreContext, in_progress: &AtomicBool) -> Result<()
 
     // Make sure the in_progress status gets updated even on failure
     in_progress.store(true, AtomicOrdering::Release);
-    let opponent = find_opponent(ctx, message_id, challenger.id.get(), in_progress).await;
-
-    let Some((interaction, accepter)) = opponent else {
+    let Some((interaction, opponent)) =
+        find_opponent(&ctx, message_id, challenger.id.get(), in_progress).await
+    else {
         let duel_timeout_msg = format!("{challenger} failed to find someone to duel.");
         in_progress.store(false, AtomicOrdering::Release);
         return reply_handle
@@ -54,37 +54,16 @@ async fn duel_impl(ctx: impl CoreContext, in_progress: &AtomicBool) -> Result<()
             .await;
     };
 
-    let Ok(mut conn) = ctx.acquire_db_connection().await else {
-        eprintln!("Failed to acquire database connection");
-
-        in_progress.store(false, AtomicOrdering::Release);
-        return reply_handle
-            .edit(
-                ctx,
-                reply_with_buttons(
-                    "Something went wrong with the database, sorry!".into(),
-                    vec![],
-                ),
-            )
-            .await;
+    if let Err(e) = finish_duel_in_progress(ctx, interaction, challenger, opponent).await {
+        eprintln!("Failed to run duel to completion: {e:?}");
     };
-
-    match run_duel(ctx, &mut transaction, challenger, accepter).await {
-        Ok(update_resp) => {
-            interaction.create_response(ctx, update_resp).await?;
-            transaction.commit().await?;
-        }
-        Err(e) => {
-            eprintln!("Failed to run duel to completiton: {e:?}");
-        }
-    }
 
     in_progress.store(false, AtomicOrdering::Release);
 
     Ok(())
 }
 
-async fn find_challenger(ctx: impl CoreContext, in_progress: &AtomicBool) -> Result<DuelUser> {
+async fn find_challenger(ctx: &impl CoreContext, in_progress: &AtomicBool) -> Result<DuelUser> {
     let author = ctx.author();
     let challenger = DuelUser::from(ctx.user_id(author), ctx.user_name(author).await);
 
@@ -104,7 +83,7 @@ async fn find_challenger(ctx: impl CoreContext, in_progress: &AtomicBool) -> Res
 }
 
 async fn find_opponent<C: CoreContext>(
-    ctx: C,
+    ctx: &C,
     message_id: MessageId,
     challenger_id: u64,
     in_progress: &AtomicBool,
@@ -160,31 +139,44 @@ async fn find_opponent<C: CoreContext>(
     None
 }
 
-async fn run_duel<C: CoreContext>(
+async fn finish_duel_in_progress<C: CoreContext>(
     ctx: C,
-    transaction: &mut Transaction<'_, sqlx::Sqlite>,
+    interaction: C::Interaction,
     challenger: DuelUser,
     accepter: DuelUser,
-) -> Result<CreateInteractionResponse> {
+) -> Result<()> {
+    let mut conn = ctx
+        .acquire_db_connection()
+        .await
+        .context("Failed to acquire database connection")?;
+    let mut transaction = conn.begin().await.context("Failed to begin transaction")?;
+
     let (challenger_score, accepter_score) = pick_scores();
 
     let winner_text = match challenger_score.cmp(&accepter_score) {
         Ordering::Greater => {
             let (winner_id, loser_id) = (&challenger.string_id, &accepter.string_id);
-            update_users_win_loss(transaction, winner_id, loser_id).await?;
+            update_users_win_loss(&mut transaction, winner_id, loser_id)
+                .await
+                .context("Failed to update users win/loss")?;
 
             format!("{challenger} has won!")
         }
         Ordering::Less => {
             let (winner_id, loser_id) = (&accepter.string_id, &challenger.string_id);
-            update_users_win_loss(transaction, winner_id, loser_id).await?;
+            update_users_win_loss(&mut transaction, winner_id, loser_id)
+                .await
+                .context("Failed to update users win/loss")?;
 
             format!("{accepter} has won!")
         }
         Ordering::Equal => {
-            update_users_drawn(transaction, &challenger.string_id, &accepter.string_id).await?;
+            update_users_drawn(&mut transaction, &challenger.string_id, &accepter.string_id)
+                .await
+                .context("Failed to update users draws")?;
 
-            let timeout_end_time = Utc::now() + chrono::Duration::from_std(TIMEOUT_DURATION)?;
+            let timeout_end_time =
+                Utc::now() + chrono::Duration::from_std(TIMEOUT_DURATION).unwrap();
             let challenger_member = ctx.author_member().await;
             let accepter_member = ctx.user_member(accepter.id).await;
 
@@ -198,8 +190,11 @@ async fn run_duel<C: CoreContext>(
 
     let final_message = format!("{accepter} has rolled a {accepter_score} and {challenger} has rolled a {challenger_score}. {winner_text}");
     let update_resp = update_response(text_message(final_message).components(Vec::new()));
+    ctx.respond(interaction, update_resp)
+        .await
+        .context("Failed to respond to duel end")?;
 
-    Ok(update_resp)
+    Ok(())
 }
 
 /// Display your duel statistics
@@ -348,19 +343,6 @@ impl DuelStats {
                 ))
                 .icon_url(avatar_url),
             )
-    }
-}
-
-async fn timeout_user(ctx: Context<'_>, member: Option<Member>, until: DateTime<Utc>) {
-    let Some(mut member) = member else {
-        return;
-    };
-
-    if let Err(e) = member
-        .disable_communication_until_datetime(ctx, until.into())
-        .await
-    {
-        eprintln!("Failed to timeout {}, reason: {e:?}", member.user.name);
     }
 }
 
