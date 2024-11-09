@@ -91,7 +91,7 @@ async fn find_opponent<C: CoreContext>(
     let collector = &mut ctx
         .create_collector()
         .message_id(message_id)
-        .filter(Box::new(|f: &C::Interaction| f.custom_id() == "duel-btn")) // TODO: why doesn't this know what type it is at this point
+        .filter(Box::new(|f: &C::Interaction| f.custom_id() == "duel-btn"))
         .timeout(DEAD_DUEL_COOLDOWN)
         .stream();
 

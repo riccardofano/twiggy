@@ -1,14 +1,12 @@
 use crate::Context;
 
 use poise::serenity_prelude::{
-    Colour, CreateActionRow, CreateEmbed, CreateInteractionResponse,
-    CreateInteractionResponseMessage, Member, User,
+    CreateActionRow, CreateEmbed, CreateInteractionResponse, CreateInteractionResponseMessage, User,
 };
 use poise::CreateReply;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rand_seeder::Seeder;
-use std::borrow::Cow;
 
 pub fn response(message: CreateInteractionResponseMessage) -> CreateInteractionResponse {
     CreateInteractionResponse::Message(message)
@@ -58,14 +56,6 @@ pub async fn name(ctx: &Context<'_>, person: &User) -> String {
     nickname(ctx, person)
         .await
         .unwrap_or_else(|| person.name.clone())
-}
-
-pub async fn member<'a>(ctx: &'a Context<'_>) -> Option<Cow<'a, Member>> {
-    ctx.author_member().await
-}
-
-pub async fn colour(ctx: &Context<'_>) -> Option<Colour> {
-    member(ctx).await?.colour(ctx)
 }
 
 pub fn avatar_url(person: &User) -> String {

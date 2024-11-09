@@ -80,7 +80,7 @@ pub trait CoreInteraction {
     fn custom_id(&self) -> &str;
 }
 
-pub type FilterFn<I: CoreInteraction> = Box<dyn Fn(&I) -> bool + Send + Sync + 'static>;
+pub type FilterFn<I> = Box<dyn Fn(&I) -> bool + Send + Sync + 'static>;
 #[cfg_attr(test, mockall::automock(type Item = MockCoreInteraction;))]
 pub trait CoreCollector: Send + Sync {
     type Item: CoreInteraction;
