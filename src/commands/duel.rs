@@ -6,15 +6,13 @@ use crate::Context as DiscordContext;
 
 use anyhow::{bail, Context as AnyhowContext, Result};
 use chrono::{DateTime, NaiveDateTime, Utc};
+use poise::futures_util::StreamExt;
 use poise::serenity_prelude::{
     ButtonStyle, CreateActionRow, CreateButton, CreateEmbed, CreateEmbedAuthor, Member, UserId,
 };
 use poise::CreateReply;
 use rand::Rng;
-use serenity::all::{
-    Colour, ComponentInteraction, ComponentInteractionCollector, CreateInteractionResponse,
-    MessageId,
-};
+use serenity::all::{Colour, CreateInteractionResponse, MessageId};
 use sqlx::{Connection, SqliteExecutor, Transaction};
 use std::cmp::Ordering;
 use std::fmt::Display;
@@ -34,17 +32,10 @@ pub async fn duel(ctx: DiscordContext<'_>) -> Result<()> {
     duel_impl(ctx, &IN_PROGRESS).await
 }
 async fn duel_impl(ctx: impl CoreContext, in_progress: &AtomicBool) -> Result<()> {
-    let author = ctx.author();
-    let challenger = DuelUser::from(ctx.user_id(author), ctx.user_name(author).await);
-
-    if in_progress.load(AtomicOrdering::Acquire) {
-        return ctx.bail("A duel is already in progress".into()).await;
-    }
-
-    let mut conn = ctx.acquire_db_connection().await?;
-    if let Err(e) = challenger.ensure_outside_cooldown(&mut conn).await {
-        return ctx.bail(e.to_string()).await;
-    }
+    let challenger = match find_challenger(ctx, in_progress).await {
+        Ok(challenger) => challenger,
+        Err(e) => return ctx.bail(e.to_string()).await,
+    };
 
     let reply_content = format!("{challenger} is looking for a duel, press the button to accept.");
     let builder = reply_with_buttons(reply_content, vec![create_accept_button()]);
@@ -68,7 +59,13 @@ async fn duel_impl(ctx: impl CoreContext, in_progress: &AtomicBool) -> Result<()
 
         in_progress.store(false, AtomicOrdering::Release);
         return reply_handle
-            .edit(ctx, reply_with_buttons("Something went wrong with the database, sorry!".into(), vec![]))
+            .edit(
+                ctx,
+                reply_with_buttons(
+                    "Something went wrong with the database, sorry!".into(),
+                    vec![],
+                ),
+            )
             .await;
     };
 
@@ -79,57 +76,31 @@ async fn duel_impl(ctx: impl CoreContext, in_progress: &AtomicBool) -> Result<()
         }
         Err(e) => {
             eprintln!("Failed to run duel to completiton: {e:?}");
-
         }
+    }
 
-    interaction.create_response(ctx, update_resp).await?;
-
-    transaction.commit().await?;
     in_progress.store(false, AtomicOrdering::Release);
 
     Ok(())
 }
 
-async fn run_duel<C: CoreContext>(
-    ctx: C,
-    transaction: &mut Transaction<'_, sqlx::Sqlite>,
-    challenger: DuelUser,
-    accepter: DuelUser,
-) -> Result<CreateInteractionResponse> {
-    let (challenger_score, accepter_score) = pick_scores();
+async fn find_challenger(ctx: impl CoreContext, in_progress: &AtomicBool) -> Result<DuelUser> {
+    let author = ctx.author();
+    let challenger = DuelUser::from(ctx.user_id(author), ctx.user_name(author).await);
 
-    let winner_text = match challenger_score.cmp(&accepter_score) {
-        Ordering::Greater => {
-            let (winner_id, loser_id) = (&challenger.string_id, &accepter.string_id);
-            update_users_win_loss(transaction, winner_id, loser_id).await?;
+    if in_progress.load(AtomicOrdering::Acquire) {
+        bail!("a duel is already in progress");
+    }
 
-            format!("{challenger} has won!")
-        }
-        Ordering::Less => {
-            let (winner_id, loser_id) = (&accepter.string_id, &challenger.string_id);
-            update_users_win_loss(transaction, winner_id, loser_id).await?;
+    let mut conn = ctx
+        .acquire_db_connection()
+        .await
+        .context("There was a problem with the database, sorry!")?;
+    if let Err(e) = challenger.ensure_outside_cooldown(&mut conn).await {
+        bail!(e.to_string());
+    }
 
-            format!("{accepter} has won!")
-        }
-        Ordering::Equal => {
-            update_users_drawn(transaction, &challenger.string_id, &accepter.string_id).await?;
-
-            let timeout_end_time = Utc::now() + chrono::Duration::from_std(TIMEOUT_DURATION)?;
-            let challenger_member = ctx.author_member().await;
-            let accepter_member = ctx.user_member(accepter.id).await;
-
-            ctx.timeout(challenger_member, timeout_end_time).await;
-            ctx.timeout(accepter_member, timeout_end_time).await;
-
-            "It's a draw! Now go sit in a corner for 10 minutes and think about your actions..."
-                .into()
-        }
-    };
-
-    let final_message = format!("{accepter} has rolled a {accepter_score} and {challenger} has rolled a {challenger_score}. {winner_text}");
-    let update_resp = update_response(text_message(final_message).components(Vec::new()));
-
-    Ok(update_resp)
+    Ok(challenger)
 }
 
 async fn find_opponent<C: CoreContext>(
@@ -138,11 +109,12 @@ async fn find_opponent<C: CoreContext>(
     challenger_id: u64,
     in_progress: &AtomicBool,
 ) -> Option<(C::Interaction, DuelUser)> {
-    let mut collector = ctx
+    let collector = &mut ctx
         .create_collector()
         .message_id(message_id)
-        .filter(todo!()) // TODO: why doesn't this know what type it is at this point
-        .timeout(DEAD_DUEL_COOLDOWN);
+        .filter(Box::new(|f: &C::Interaction| f.custom_id() == "duel-btn")) // TODO: why doesn't this know what type it is at this point
+        .timeout(DEAD_DUEL_COOLDOWN)
+        .stream();
 
     while let Some(interaction) = collector.next().await {
         // NOTE: responding with an ephemeral message does not trigger the
@@ -186,6 +158,48 @@ async fn find_opponent<C: CoreContext>(
     }
 
     None
+}
+
+async fn run_duel<C: CoreContext>(
+    ctx: C,
+    transaction: &mut Transaction<'_, sqlx::Sqlite>,
+    challenger: DuelUser,
+    accepter: DuelUser,
+) -> Result<CreateInteractionResponse> {
+    let (challenger_score, accepter_score) = pick_scores();
+
+    let winner_text = match challenger_score.cmp(&accepter_score) {
+        Ordering::Greater => {
+            let (winner_id, loser_id) = (&challenger.string_id, &accepter.string_id);
+            update_users_win_loss(transaction, winner_id, loser_id).await?;
+
+            format!("{challenger} has won!")
+        }
+        Ordering::Less => {
+            let (winner_id, loser_id) = (&accepter.string_id, &challenger.string_id);
+            update_users_win_loss(transaction, winner_id, loser_id).await?;
+
+            format!("{accepter} has won!")
+        }
+        Ordering::Equal => {
+            update_users_drawn(transaction, &challenger.string_id, &accepter.string_id).await?;
+
+            let timeout_end_time = Utc::now() + chrono::Duration::from_std(TIMEOUT_DURATION)?;
+            let challenger_member = ctx.author_member().await;
+            let accepter_member = ctx.user_member(accepter.id).await;
+
+            ctx.timeout(challenger_member, timeout_end_time).await;
+            ctx.timeout(accepter_member, timeout_end_time).await;
+
+            "It's a draw! Now go sit in a corner for 10 minutes and think about your actions..."
+                .into()
+        }
+    };
+
+    let final_message = format!("{accepter} has rolled a {accepter_score} and {challenger} has rolled a {challenger_score}. {winner_text}");
+    let update_resp = update_response(text_message(final_message).components(Vec::new()));
+
+    Ok(update_resp)
 }
 
 /// Display your duel statistics

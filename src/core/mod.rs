@@ -1,5 +1,7 @@
 mod real;
 
+use std::future::IntoFuture;
+
 use ::serenity::all::{CreateInteractionResponse, MessageId};
 use ::serenity::futures::Stream;
 use chrono::{DateTime, Utc};
@@ -80,15 +82,14 @@ pub trait CoreInteraction {
     fn custom_id(&self) -> &str;
 }
 
-#[cfg_attr(test, mockall::automock(type Item = MockCoreInteraction; type Filter = fn(item: &MockCoreInteraction) -> bool;))]
-pub trait CoreCollector {
+pub type FilterFn<I: CoreInteraction> = Box<dyn Fn(&I) -> bool + Send + Sync + 'static>;
+#[cfg_attr(test, mockall::automock(type Item = MockCoreInteraction;))]
+pub trait CoreCollector: Send + Sync {
     type Item: CoreInteraction;
-    type Filter: Fn(&Self::Item) -> bool;
 
     fn message_id(self, message_id: MessageId) -> Self;
-    fn filter(self, handler: Self::Filter) -> Self;
+    fn filter(self, handler: FilterFn<Self::Item>) -> Self;
     fn timeout(self, duration: std::time::Duration) -> Self;
 
-    async fn next(self) -> Option<Self::Item>;
-    async fn stream(self) -> impl Stream<Item = Self::Item>;
+    fn stream(self) -> impl Stream<Item = Self::Item> + Unpin;
 }
