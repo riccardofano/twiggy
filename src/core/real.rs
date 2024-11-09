@@ -7,7 +7,7 @@ use poise::CreateReply;
 use serenity::all::MessageId;
 use sqlx::{pool::PoolConnection, Sqlite};
 
-use super::{CoreCollector, CoreContext, CoreInteraction, CoreReplyHandle};
+use super::{CoreCollector, CoreContext, CoreInteraction, CoreReplyHandle, FilterFn};
 use crate::Result;
 
 impl<'a> CoreContext for poise::Context<'a, crate::Data, crate::Error> {
@@ -137,22 +137,18 @@ impl CoreInteraction for serenity::all::ComponentInteraction {
 
 impl CoreCollector for ComponentInteractionCollector {
     type Item = serenity::all::ComponentInteraction;
-    type Filter = fn(item: &Self::Item) -> bool;
 
     fn message_id(self, message_id: MessageId) -> Self {
         self.message_id(message_id)
     }
-    fn filter(self, handler: Self::Filter) -> Self {
+    fn filter(self, handler: FilterFn<Self::Item>) -> Self {
         self.filter(handler)
     }
     fn timeout(self, duration: std::time::Duration) -> Self {
         self.timeout(duration)
     }
 
-    async fn next(self) -> Option<<Self as CoreCollector>::Item> {
-        self.next().await
-    }
-    async fn stream(self) -> impl Stream<Item = <Self as CoreCollector>::Item> {
+    fn stream(self) -> impl Stream<Item = <Self as CoreCollector>::Item> + Unpin {
         self.stream()
     }
 }
