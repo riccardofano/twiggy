@@ -1,7 +1,5 @@
 mod real;
 
-use std::future::IntoFuture;
-
 use ::serenity::all::{CreateInteractionResponse, MessageId};
 use ::serenity::futures::Stream;
 use chrono::{DateTime, Utc};
