@@ -12,7 +12,7 @@ use poise::serenity_prelude::{
 };
 use poise::CreateReply;
 use rand::Rng;
-use serenity::all::{Colour, MessageId};
+use serenity::all::{Colour, Mention, MessageId};
 use sqlx::{Connection, SqliteExecutor, Transaction};
 use std::cmp::Ordering;
 use std::fmt::Display;
@@ -160,7 +160,7 @@ async fn finish_duel_in_progress<C: CoreContext>(
                 .await
                 .context("Failed to update users win/loss")?;
 
-            format!("{challenger} has won!")
+            format!("{} has won!", Mention::User(challenger.id))
         }
         Ordering::Less => {
             let (winner_id, loser_id) = (&accepter.string_id, &challenger.string_id);
@@ -168,7 +168,7 @@ async fn finish_duel_in_progress<C: CoreContext>(
                 .await
                 .context("Failed to update users win/loss")?;
 
-            format!("{accepter} has won!")
+            format!("{} has won!", Mention::User(accepter.id))
         }
         Ordering::Equal => {
             update_users_drawn(&mut transaction, &challenger.string_id, &accepter.string_id)
@@ -188,7 +188,11 @@ async fn finish_duel_in_progress<C: CoreContext>(
         }
     };
 
-    let final_message = format!("{accepter} has rolled a {accepter_score} and {challenger} has rolled a {challenger_score}. {winner_text}");
+    let final_message = format!(
+        "{} has rolled a {accepter_score} and {} has rolled a {challenger_score}. {winner_text}",
+        Mention::User(accepter.id),
+        Mention::User(challenger.id)
+    );
     let update_resp = update_response(text_message(final_message).components(Vec::new()));
     ctx.respond(interaction, update_resp)
         .await
