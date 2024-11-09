@@ -128,10 +128,10 @@ impl CoreInteraction for serenity::all::ComponentInteraction {
     type User = serenity::User;
 
     fn author(&self) -> &Self::User {
-        todo!()
+        &self.user
     }
     fn author_id(&self) -> serenity::UserId {
-        todo!()
+        self.user.id
     }
     fn custom_id(&self) -> &str {
         self.data.custom_id.as_str()
