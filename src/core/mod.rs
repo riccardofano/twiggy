@@ -1,9 +1,6 @@
 mod real;
 
-use std::task::Context;
-
 use ::serenity::all::{CreateInteractionResponse, MessageId};
-use ::serenity::builder;
 use ::serenity::futures::Stream;
 use chrono::{DateTime, Utc};
 use poise::serenity_prelude::{self as serenity};
@@ -26,8 +23,8 @@ pub struct MockMessage;
     type User=MockUser;
     type Member=MockMember;
     type ReplyHandle=MockCoreReplyHandle;
-    type Interaction=MockCoreInteraction<MockCoreContext>;
-    type Collector=MockCoreCollector<MockCoreContext>;
+    type Interaction=MockCoreInteraction;
+    type Collector=MockCoreCollector;
 ))]
 pub trait CoreContext {
     type Data;
@@ -35,13 +32,16 @@ pub trait CoreContext {
     type User;
 
     type ReplyHandle: CoreReplyHandle<Context = Self>;
+    type Interaction: CoreInteraction<Member = Self::Member, User = Self::User>;
+    type Collector: CoreCollector<Item = Self::Interaction>;
 
     fn data(&self) -> Self::Data;
     async fn acquire_db_connection(&self) -> Result<PoolConnection<Sqlite>>;
-    async fn author_member(&self) -> Option<Self::Member>;
 
     fn author(&self) -> &Self::User;
+    async fn author_member(&self) -> Option<Self::Member>;
     fn user_id(&self, user: &Self::User) -> serenity::UserId;
+    async fn user_member(&self, user_id: serenity::UserId) -> Option<Self::Member>;
     async fn user_nickname(&self, user: &Self::User) -> Option<String>;
     async fn user_name(&self, user: &Self::User) -> String;
     async fn user_colour(&self, user: &Self::User) -> Option<serenity::Colour>;
@@ -50,7 +50,14 @@ pub trait CoreContext {
     async fn reply(&self, builder: CreateReply) -> Result<()>;
     async fn bail(&self, content: String) -> Result<()>;
     async fn reply_with_handle(&self, builder: CreateReply) -> Result<Self::ReplyHandle>;
+    async fn respond(
+        &self,
+        interaction: Self::Interaction,
+        builder: CreateInteractionResponse,
+    ) -> Result<()>;
+
     async fn timeout(&self, member: Option<Self::Member>, until: DateTime<Utc>);
+    fn create_collector(&self) -> Self::Collector;
 }
 
 #[cfg_attr(test, mockall::automock(type Context = MockCoreContext; type Message = MockMessage;))]
@@ -68,21 +75,18 @@ pub trait CoreInteraction {
     type Member;
     type User;
 
-    async fn member(&self) -> Option<Self::Member>;
     fn author(&self) -> &Self::User;
     fn author_id(&self) -> serenity::UserId;
     fn custom_id(&self) -> &str;
-
-    // fn respond(ctx: Self::Context, builder: CreateInteractionResponse) -> Result<()>;
 }
 
-#[cfg_attr(test, mockall::automock(type Item = MockCoreInteraction;))]
+#[cfg_attr(test, mockall::automock(type Item = MockCoreInteraction; type Filter = fn(item: &MockCoreInteraction) -> bool;))]
 pub trait CoreCollector {
     type Item: CoreInteraction;
-    // type Filter: Fn(&Self::Item) -> bool;
+    type Filter: Fn(&Self::Item) -> bool;
 
     fn message_id(self, message_id: MessageId) -> Self;
-    // fn filter(self, filter: Self::Filter) -> Self;
+    fn filter(self, handler: Self::Filter) -> Self;
     fn timeout(self, duration: std::time::Duration) -> Self;
 
     async fn next(self) -> Option<Self::Item>;

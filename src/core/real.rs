@@ -14,10 +14,9 @@ impl<'a> CoreContext for poise::Context<'a, crate::Data, crate::Error> {
     type Data = &'a crate::Data;
     type User = serenity::User;
     type Member = serenity::Member;
-
     type ReplyHandle = poise::ReplyHandle<'a>;
-    // type Interaction = ComponentInteraction;
-    // type Collector = ComponentInteractionCollector;
+    type Interaction = ComponentInteraction;
+    type Collector = ComponentInteractionCollector;
 
     fn data(&self) -> Self::Data {
         poise::Context::data(*self)
@@ -37,9 +36,12 @@ impl<'a> CoreContext for poise::Context<'a, crate::Data, crate::Error> {
         let m = poise::Context::author_member(*self).await;
         m.map(|m| m.into_owned())
     }
-
     fn user_id(&self, user: &Self::User) -> serenity::UserId {
         user.id
+    }
+    async fn user_member(&self, user_id: serenity::UserId) -> Option<Self::Member> {
+        let guild_id = self.guild_id()?;
+        self.http().get_member(guild_id, user_id).await.ok()
     }
     async fn user_nickname(&self, user: &Self::User) -> Option<String> {
         let guild_id = self.guild_id()?;
@@ -74,6 +76,13 @@ impl<'a> CoreContext for poise::Context<'a, crate::Data, crate::Error> {
     async fn reply_with_handle(&self, builder: CreateReply) -> Result<Self::ReplyHandle> {
         self.send(builder).await.context("Failed to send reply")
     }
+    async fn respond(
+        &self,
+        interaction: Self::Interaction,
+        builder: CreateInteractionResponse,
+    ) -> Result<()> {
+        todo!();
+    }
     async fn timeout(&self, member: Option<Self::Member>, until: DateTime<Utc>) {
         if let Some(mut member) = member {
             if let Err(e) = member
@@ -84,19 +93,9 @@ impl<'a> CoreContext for poise::Context<'a, crate::Data, crate::Error> {
             }
         }
     }
-    // fn create_collector(&self) -> Self::Collector {
-    //     Self::Collector::new(self)
-    // }
-    // async fn respond(
-    //     &self,
-    //     interaction: Self::Interaction,
-    //     builder: CreateInteractionResponse,
-    // ) -> Result<()> {
-    //     interaction
-    //         .create_response(self, builder)
-    //         .await
-    //         .context("Failed to respond to interaction")
-    // }
+    fn create_collector(&self) -> Self::Collector {
+        Self::Collector::new(self)
+    }
 }
 
 impl<'a> CoreReplyHandle for poise::ReplyHandle<'a> {
@@ -125,9 +124,6 @@ impl CoreInteraction for serenity::all::ComponentInteraction {
     type Member = serenity::Member;
     type User = serenity::User;
 
-    async fn member(&self) -> Option<Self::Member> {
-        todo!()
-    }
     fn author(&self) -> &Self::User {
         todo!()
     }
@@ -141,22 +137,22 @@ impl CoreInteraction for serenity::all::ComponentInteraction {
 
 impl CoreCollector for ComponentInteractionCollector {
     type Item = serenity::all::ComponentInteraction;
-    // type Filter = fn(item: &Self::Item) -> bool;
+    type Filter = fn(item: &Self::Item) -> bool;
 
     fn message_id(self, message_id: MessageId) -> Self {
         self.message_id(message_id)
     }
-    // fn filter(self, filter: Self::Filter) -> Self {
-    //     self.filter(filter)
-    // }
+    fn filter(self, handler: Self::Filter) -> Self {
+        self.filter(handler)
+    }
     fn timeout(self, duration: std::time::Duration) -> Self {
         self.timeout(duration)
     }
 
-    async fn next(self) -> Option<Self::Item> {
+    async fn next(self) -> Option<<Self as CoreCollector>::Item> {
         self.next().await
     }
-    async fn stream(self) -> impl Stream<Item = Self::Item> {
+    async fn stream(self) -> impl Stream<Item = <Self as CoreCollector>::Item> {
         self.stream()
     }
 }
