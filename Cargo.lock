@@ -1769,6 +1769,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rpg-dice-roller"
+version = "0.1.0"
+source = "git+https://github.com/riccardofano/rpg-dice-roller.git#0709c1a03abed914be291e10976ff0a8c42d110d"
+dependencies = [
+ "rand",
+ "winnow",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2583,6 +2592,7 @@ dependencies = [
  "rand",
  "rand_seeder",
  "reqwest",
+ "rpg-dice-roller",
  "serde",
  "serde_json",
  "serenity",
@@ -3111,6 +3121,15 @@ name = "windows_x86_64_msvc"
 version = "0.52.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bec47e5bfd1bff0eeaf6d8b485cc1074891a197ab4225d504cb7a1ab88b02bf0"
+
+[[package]]
+name = "winnow"
+version = "0.6.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36c1fec1a2bb5866f07c25f68c26e565c4c200aebb96d7e55710c19d3e8ac49b"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "winreg"

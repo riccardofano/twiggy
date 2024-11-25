@@ -8,6 +8,7 @@ mod mixu;
 mod poll;
 mod quote;
 mod rockpaperscissors;
+mod roll;
 mod rpg;
 mod sudoku;
 
@@ -70,6 +71,7 @@ pub fn get_commands() -> Vec<Command<Data, Error>> {
         rockpaperscissors::rps(),
         sudoku::sudoku(),
         colors::uncolor(),
+        roll::roll(),
     ]
 }
 
