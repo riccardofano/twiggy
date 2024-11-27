@@ -1770,8 +1770,8 @@ dependencies = [
 
 [[package]]
 name = "rpg-dice-roller"
-version = "0.1.0"
-source = "git+https://github.com/riccardofano/rpg-dice-roller.git#0709c1a03abed914be291e10976ff0a8c42d110d"
+version = "0.1.1"
+source = "git+https://github.com/riccardofano/rpg-dice-roller.git#7a822b1a6ed4fab7fcaf4fccd19589214979a8ae"
 dependencies = [
  "rand",
  "winnow",

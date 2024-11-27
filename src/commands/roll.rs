@@ -14,7 +14,7 @@ pub async fn dice(
 ) -> Result<()> {
     match rpg_dice_roller::roll(&expression) {
         Err(msg) => {
-            let full_message = format!("Failed to parse expression:\n{msg}");
+            let full_message = format!("```\nFailed to parse expression:\n{msg}\n```");
             ctx.send(ephemeral_reply(full_message)).await?;
         }
         Ok(rolled) => {
