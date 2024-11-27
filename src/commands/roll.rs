@@ -12,21 +12,23 @@ pub async fn dice(
     ctx: Context<'_>,
     #[description = "The expression that will be parsed and rolled"] expression: String,
 ) -> Result<()> {
-    match rpg_dice_roller::roll(&expression) {
+    let rolled = match rpg_dice_roller::roll(&expression) {
+        Ok(rolled) => rolled,
         Err(msg) => {
             let full_message = format!("```\nFailed to parse expression:\n{msg}\n```");
             ctx.send(ephemeral_reply(full_message)).await?;
+            return Ok(());
         }
-        Ok(rolled) => {
-            let rolls = rolled.to_string();
-            let message = if rolls.len() < 200 {
-                format!("'{expression}': {} = {}", rolls, rolled.value())
-            } else {
-                format!("'{expression}' = {}", rolled.value())
-            };
-            ctx.say(message).await?;
-        }
-    }
+    };
+
+    let rolls = rolled.to_string();
+    let message = if rolls.len() < 200 {
+        format!("`{expression}`: {} = {}", rolls, rolled.value())
+    } else {
+        format!("`{expression}` = {}", rolled.value())
+    };
+
+    ctx.say(message).await?;
 
     Ok(())
 }
