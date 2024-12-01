@@ -36,7 +36,7 @@ pub async fn dice(
 #[poise::command(slash_command, prefix_command)]
 pub async fn cursed(ctx: Context<'_>) -> Result<()> {
     let dice = Dice::new(999, DiceKind::Standard(444), &[]);
-    let rolled = dice.roll_all(&mut rand::thread_rng());
+    let rolled = dice.roll_all();
 
     ctx.say(format!("'999d444' = {}", rolled.value())).await?;
 
