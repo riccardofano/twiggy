@@ -1770,9 +1770,9 @@ dependencies = [
 
 [[package]]
 name = "rpg-dice-roller"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "157f5cbe7f844d37453ad5fe8e3c60e4fec830235e0e2dbb3377ffd6c85f8089"
+checksum = "eec92693ddbe45f0af0065590ad0fe6268e3c1616bdec524a4bc7b83d09ddbd3"
 dependencies = [
  "rand",
  "winnow",
