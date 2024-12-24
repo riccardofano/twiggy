@@ -11,6 +11,13 @@ const BASE_GAME_PAGE_URL: &str = "https://isthereanydeal.com/game";
 
 pub static ITAD_CLIENT_ID: OnceLock<String> = OnceLock::new();
 
+pub fn initialize_client_id() -> Result<()> {
+    let client_id = std::env::var("ITAD_CLIENT_ID")?;
+    ITAD_CLIENT_ID.set(client_id).unwrap();
+
+    Ok(())
+}
+
 #[poise::command(slash_command, prefix_command, global_cooldown = 30)]
 pub async fn itad(
     ctx: Context<'_>,

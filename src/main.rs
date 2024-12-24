@@ -39,8 +39,7 @@ async fn main() {
         .expect("Expected to be able to connect to the database");
 
     // Initialize default commands
-    let commands = commands::get_commands();
-    commands::initialize_commands(&database).await;
+    let commands = commands::initialize_commands(&database).await;
     commands::set_system_commands(&commands);
 
     let options = poise::FrameworkOptions {
