@@ -77,6 +77,16 @@ pub async fn initialize_commands(database: &sqlx::SqlitePool) -> Vec<Command<Dat
         ),
     }
 
+    match mixu::set_initial_best_mixu_score(database).await {
+        Ok(_) => {
+            commands.push(mixu::mixu());
+            commands.push(mixu::bestmixu())
+        },
+        Err(e) => eprintln!(
+            "[WARNING] /mixu and /bestmixu commands were disabled because the bot failed to retrieve max mixu score: {e}"
+        ),
+    }
+
     match setup_dinos() {
         Ok(_) => commands.push(dino::dino()),
         Err(e) => eprintln!("[WARNING] /dino commands were disabled because something went wrong while setting the fragments: {e}")
