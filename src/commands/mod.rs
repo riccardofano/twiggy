@@ -14,6 +14,7 @@ mod rpg;
 mod sudoku;
 
 use crate::{Data, Error};
+use dino::setup_dinos;
 use dynamic_commands::CommandInfo;
 use poise::serenity_prelude::{all::CreateCommand, Context as SerenityContext};
 use poise::Command;
@@ -74,6 +75,11 @@ pub async fn initialize_commands(database: &sqlx::SqlitePool) -> Vec<Command<Dat
         Err(_) => eprintln!(
             "[WARNING] /itad command was disabled because ITAD_CLIENT_ID was not provided."
         ),
+    }
+
+    match setup_dinos() {
+        Ok(_) => commands.push(dino::dino()),
+        Err(e) => eprintln!("[WARNING] /dino commands were disabled because something went wrong while setting the fragments: {e}")
     }
 
     commands
