@@ -1,6 +1,9 @@
 use crate::{common::bail_reply, Context, Result};
 
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::{
+    atomic::{AtomicI64, Ordering},
+    OnceLock,
+};
 
 use anyhow::bail;
 use chrono::Utc;
@@ -19,6 +22,14 @@ pub enum Unit {
 // This looks dumb but it tells me that I'm using seconds
 // instead of just being a random number
 const ASK_COOLDOWN: i64 = std::time::Duration::from_secs(10).as_secs() as i64;
+static WOLFRAM_APP_ID: OnceLock<String> = OnceLock::new();
+
+pub fn initialize_app_id() -> Result<()> {
+    let app_id = std::env::var("WOLFRAM_APP_ID")?;
+    WOLFRAM_APP_ID.set(app_id).unwrap();
+
+    Ok(())
+}
 
 /// Ask a question to Wolfram Alpha
 #[poise::command(slash_command, prefix_command, custom_data = "AtomicI64::new(0)")]
@@ -27,16 +38,11 @@ pub async fn ask(
     #[description = "The question you want to ask"] question: String,
     #[description = "The units of measurement"] units: Option<Unit>,
 ) -> Result<()> {
-    let Ok(wolfram_app_id) = std::env::var("WOLFRAM_APP_ID") else {
-        let msg = "The `ask` command does not work without a Wolfram App ID.";
-        return bail_reply(ctx, msg).await;
-    };
-
     if let Err(cooldown_msg) = update_cooldown(ctx).await {
         return bail_reply(ctx, cooldown_msg.to_string()).await;
     }
 
-    let answer = fetch_answer(&wolfram_app_id, &question, units).await?;
+    let answer = fetch_answer(WOLFRAM_APP_ID.get().unwrap(), &question, units).await?;
 
     let embed = CreateEmbed::default()
         .title(truncate(question, 256))

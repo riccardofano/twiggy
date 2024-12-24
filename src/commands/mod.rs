@@ -4,6 +4,7 @@ mod dino;
 mod duel;
 mod dynamic_commands;
 mod eightball;
+mod itad;
 mod mixu;
 mod poll;
 mod quote;
@@ -13,6 +14,7 @@ mod rpg;
 mod sudoku;
 
 use crate::{Data, Error};
+use dino::setup_dinos;
 use dynamic_commands::CommandInfo;
 use poise::serenity_prelude::{all::CreateCommand, Context as SerenityContext};
 use poise::Command;
@@ -21,13 +23,6 @@ use std::{collections::HashMap, sync::OnceLock};
 pub use dynamic_commands::{try_intercepting_command_call, CommandKind, SimpleCommands};
 
 pub static DEFAULT_COMMANDS: OnceLock<Vec<String>> = OnceLock::new();
-
-pub async fn initialize_commands(database: &sqlx::SqlitePool) {
-    dino::setup_dinos();
-    mixu::set_initial_best_mixu_score(database)
-        .await
-        .expect("Unable to set best mixu score");
-}
 
 pub async fn setup_collectors(ctx: &SerenityContext, user_data: &Data) {
     tokio::select! {
@@ -53,26 +48,51 @@ pub async fn register_dynamic_commands_for_every_guild(ctx: &SerenityContext, us
     *data_commands = commands_map;
 }
 
-pub fn get_commands() -> Vec<Command<Data, Error>> {
-    vec![
-        poll::poll(),
-        ask::ask(),
-        mixu::bestmixu(),
+pub async fn initialize_commands(database: &sqlx::SqlitePool) -> Vec<Command<Data, Error>> {
+    let mut commands = vec![
         colors::color(),
-        dynamic_commands::commands(),
-        dino::dino(),
+        colors::uncolor(),
         duel::duel(),
         duel::duelstats(),
+        dynamic_commands::commands(),
         eightball::eightball(),
         mixu::mikustare(),
-        mixu::mixu(),
+        poll::poll(),
         quote::quote(),
-        rpg::rpg(),
         rockpaperscissors::rps(),
-        sudoku::sudoku(),
-        colors::uncolor(),
         roll::roll(),
-    ]
+        rpg::rpg(),
+        sudoku::sudoku(),
+    ];
+
+    match ask::initialize_app_id() {
+        Ok(_) => commands.push(ask::ask()),
+        Err(_) => eprintln!("[WARNING] /ask was disabled because WOLFRAM_APP_ID was not provided."),
+    }
+
+    match itad::initialize_client_id() {
+        Ok(_) => commands.push(itad::itad()),
+        Err(_) => eprintln!(
+            "[WARNING] /itad command was disabled because ITAD_CLIENT_ID was not provided."
+        ),
+    }
+
+    match mixu::set_initial_best_mixu_score(database).await {
+        Ok(_) => {
+            commands.push(mixu::mixu());
+            commands.push(mixu::bestmixu())
+        },
+        Err(e) => eprintln!(
+            "[WARNING] /mixu and /bestmixu commands were disabled because the bot failed to retrieve max mixu score: {e}"
+        ),
+    }
+
+    match setup_dinos() {
+        Ok(_) => commands.push(dino::dino()),
+        Err(e) => eprintln!("[WARNING] /dino commands were disabled because something went wrong while setting the fragments: {e}")
+    }
+
+    commands
 }
 
 #[derive(Debug)]

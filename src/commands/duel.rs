@@ -2,9 +2,9 @@ use crate::common::{
     avatar_url, bail_reply, colour, ephemeral_text_message, name, reply_with_buttons, response,
     text_message, update_response,
 };
-use crate::Context as DiscordContext;
+use crate::Context;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Context as AnyhowContext, Result};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use poise::serenity_prelude::{
     ButtonStyle, CreateActionRow, CreateButton, CreateEmbed, CreateEmbedAuthor, Member, User,
@@ -28,7 +28,7 @@ static IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
 /// Challenge the chat to a duel
 #[poise::command(slash_command, guild_only)]
-pub async fn duel(ctx: DiscordContext<'_>) -> Result<()> {
+pub async fn duel(ctx: Context<'_>) -> Result<()> {
     let challenger = DuelUser::from(ctx, ctx.author()).await;
 
     if IN_PROGRESS.load(AtomicOrdering::Acquire) {
@@ -58,7 +58,7 @@ pub async fn duel(ctx: DiscordContext<'_>) -> Result<()> {
 }
 
 async fn run_duel(
-    ctx: DiscordContext<'_>,
+    ctx: Context<'_>,
     challenger: DuelUser,
     reply_handle: ReplyHandle<'_>,
 ) -> Result<()> {
@@ -117,7 +117,7 @@ async fn run_duel(
 }
 
 async fn find_opponent(
-    ctx: DiscordContext<'_>,
+    ctx: Context<'_>,
     message_id: MessageId,
     challenger_id: u64,
 ) -> Option<(ComponentInteraction, DuelUser)> {
@@ -159,7 +159,7 @@ async fn find_opponent(
 
 /// Display your duel statistics
 #[poise::command(slash_command)]
-pub async fn duelstats(ctx: DiscordContext<'_>) -> Result<()> {
+pub async fn duelstats(ctx: Context<'_>) -> Result<()> {
     let user = ctx.author();
     let conn = &mut ctx.data().database.acquire().await?;
 
@@ -306,7 +306,7 @@ async fn get_duel_stats(
     Ok(stats)
 }
 
-async fn timeout_user(ctx: DiscordContext<'_>, member: Option<Member>, until: DateTime<Utc>) {
+async fn timeout_user(ctx: Context<'_>, member: Option<Member>, until: DateTime<Utc>) {
     let Some(mut member) = member else {
         return;
     };
@@ -335,7 +335,7 @@ struct DuelUser {
 }
 
 impl DuelUser {
-    async fn from(ctx: DiscordContext<'_>, user: &User) -> Self {
+    async fn from(ctx: Context<'_>, user: &User) -> Self {
         let id = user.id;
 
         Self {
@@ -345,7 +345,7 @@ impl DuelUser {
         }
     }
 
-    async fn ensure_outside_cooldown(&self, ctx: DiscordContext<'_>) -> Result<()> {
+    async fn ensure_outside_cooldown(&self, ctx: Context<'_>) -> Result<()> {
         let last_loss = match get_last_loss(&ctx.data().database, &self.string_id).await {
             Ok(last_loss) => last_loss,
             Err(e) => {
