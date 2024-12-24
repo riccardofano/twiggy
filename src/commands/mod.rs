@@ -64,6 +64,11 @@ pub async fn initialize_commands(database: &sqlx::SqlitePool) -> Vec<Command<Dat
         sudoku::sudoku(),
     ];
 
+    match ask::initialize_app_id() {
+        Ok(_) => commands.push(ask::ask()),
+        Err(_) => eprintln!("[WARNING] /ask was disabled because WOLFRAM_APP_ID was not provided."),
+    }
+
     match itad::initialize_client_id() {
         Ok(_) => commands.push(itad::itad()),
         Err(_) => eprintln!(
