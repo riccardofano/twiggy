@@ -24,10 +24,6 @@ async fn main() {
     let intents =
         serenity::GatewayIntents::non_privileged() | serenity::GatewayIntents::MESSAGE_CONTENT;
 
-    if std::env::var("WOLFRAM_APP_ID").is_err() {
-        eprintln!("[WARNING] The /ask command does not work without a Wolfram Alpha App ID, set WOLFRAM_APP_ID as an env variable.");
-    }
-
     let database = sqlx::sqlite::SqlitePoolOptions::new()
         .max_connections(5)
         .connect_with(
@@ -39,8 +35,7 @@ async fn main() {
         .expect("Expected to be able to connect to the database");
 
     // Initialize default commands
-    let commands = commands::get_commands();
-    commands::initialize_commands(&database).await;
+    let commands = commands::initialize_commands(&database).await;
     commands::set_system_commands(&commands);
 
     let options = poise::FrameworkOptions {

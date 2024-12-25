@@ -1,4 +1,4 @@
-use anyhow::bail;
+use anyhow::{bail, Context as AnyhowContext};
 use chrono::{NaiveDateTime, Utc};
 use image::{imageops::overlay, io::Reader, ImageBuffer, ImageOutputFormat, RgbaImage};
 use poise::serenity_prelude::{
@@ -58,8 +58,9 @@ pub const COVET_BUTTON: &str = "dino-covet";
 pub const SHUN_BUTTON: &str = "dino-shun";
 pub const FAVOURITE_BUTTON: &str = "dino-favourite";
 
-pub fn setup_dinos() {
-    let fragments_dir = std::fs::read_dir(FRAGMENT_PATH).expect("Could not read fragment path");
+pub fn setup_dinos() -> Result<()> {
+    let fragments_dir =
+        std::fs::read_dir(FRAGMENT_PATH).context("Failed to read dino fragment directory")?;
 
     let mut fragments = Fragments::default();
 
@@ -83,6 +84,8 @@ pub fn setup_dinos() {
     }
 
     DINO_FRAGMENTS.set(fragments).unwrap();
+
+    Ok(())
 }
 
 #[poise::command(
