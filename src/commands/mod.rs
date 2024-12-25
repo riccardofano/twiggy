@@ -4,6 +4,7 @@ mod dino;
 mod duel;
 mod dynamic_commands;
 mod eightball;
+mod embedpls;
 mod itad;
 mod mixu;
 mod poll;
@@ -56,6 +57,7 @@ pub async fn initialize_commands(database: &sqlx::SqlitePool) -> Vec<Command<Dat
         duel::duelstats(),
         dynamic_commands::commands(),
         eightball::eightball(),
+        embedpls::embedpls(),
         mixu::mikustare(),
         poll::poll(),
         quote::quote(),
