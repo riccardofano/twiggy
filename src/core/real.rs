@@ -1,4 +1,6 @@
-use ::serenity::all::{ComponentInteraction, CreateInteractionResponse};
+use std::borrow::Cow;
+
+use ::serenity::all::{ComponentInteraction, CreateInteractionResponse, RoleId, UserId};
 use ::serenity::futures::Stream;
 use anyhow::Context as AnyhowContext;
 use chrono::{DateTime, Utc};
@@ -11,14 +13,13 @@ use super::{CoreCollector, CoreContext, CoreInteraction, CoreReplyHandle, Filter
 use crate::Result;
 
 impl<'a> CoreContext for poise::Context<'a, crate::Data, crate::Error> {
-    type Data = &'a crate::Data;
     type User = serenity::User;
     type Member = serenity::Member;
     type ReplyHandle = poise::ReplyHandle<'a>;
     type Interaction = ComponentInteraction;
     type Collector = ComponentInteractionCollector;
 
-    fn data(&self) -> Self::Data {
+    fn data(&self) -> &crate::Data {
         poise::Context::data(*self)
     }
     async fn acquire_db_connection(&self) -> Result<PoolConnection<Sqlite>> {
@@ -35,6 +36,10 @@ impl<'a> CoreContext for poise::Context<'a, crate::Data, crate::Error> {
     async fn author_member(&self) -> Option<Self::Member> {
         let m = poise::Context::author_member(*self).await;
         m.map(|m| m.into_owned())
+    }
+    async fn user_from_id(&self, user_id: UserId) -> Result<Self::User> {
+        let user = user_id.to_user(self).await?;
+        Ok(user)
     }
     fn user_id(&self, user: &Self::User) -> serenity::UserId {
         user.id
@@ -64,11 +69,25 @@ impl<'a> CoreContext for poise::Context<'a, crate::Data, crate::Error> {
             .unwrap_or_else(|| user.default_avatar_url())
     }
 
+    fn member_has_role(&self, member: &Self::Member, role: RoleId) -> bool {
+        member.roles.contains(&role)
+    }
+
+    async fn member_role_add(&self, member: &Self::Member, role: RoleId) -> Result<()> {
+        member.add_role(self, role).await?;
+        Ok(())
+    }
+
+    async fn member_role_remove(&self, member: &Self::Member, role: RoleId) -> Result<()> {
+        member.remove_role(self, role).await?;
+        Ok(())
+    }
+
     async fn reply(&self, builder: CreateReply) -> Result<()> {
         self.send(builder).await?;
         Ok(())
     }
-    async fn bail(&self, content: String) -> Result<()> {
+    async fn bail(&self, content: &str) -> Result<()> {
         let reply = CreateReply::default().content(content).ephemeral(true);
         self.send(reply).await?;
         Ok(())
@@ -105,16 +124,20 @@ impl<'a> CoreReplyHandle for poise::ReplyHandle<'a> {
     type Context = poise::Context<'a, crate::Data, crate::Error>;
     type Message = serenity::Message;
 
+    async fn message<'b>(&'b self) -> Result<Cow<'b, Self::Message>> {
+        let message = poise::ReplyHandle::message(self).await?;
+        Ok(message)
+    }
     async fn into_message(self) -> Result<Self::Message> {
         poise::ReplyHandle::into_message(self)
             .await
             .context("Failed to turn reply handle into message")
     }
-    async fn message_id(&self) -> Result<MessageId> {
-        self.message()
-            .await
-            .map(|m| m.id)
-            .context("Failed to get message id")
+    fn message_id(message: &Self::Message) -> MessageId {
+        message.id
+    }
+    fn message_link(message: &Self::Message) -> String {
+        message.link()
     }
     async fn edit(&self, ctx: Self::Context, builder: CreateReply) -> Result<()> {
         poise::ReplyHandle::edit(self, ctx, builder)

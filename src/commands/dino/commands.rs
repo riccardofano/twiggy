@@ -7,6 +7,7 @@ use poise::serenity_prelude::{
 };
 use poise::CreateReply;
 use rand::{seq::SliceRandom, thread_rng};
+use serenity::futures::StreamExt;
 use sqlx::error::DatabaseError;
 use sqlx::sqlite::SqliteError;
 use sqlx::{FromRow, QueryBuilder, Row, Sqlite, SqliteExecutor, SqlitePool};
@@ -15,11 +16,13 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::OnceLock;
+use std::time::Duration;
 
-use crate::common::{bail_reply, embed_message, ephemeral_text_message, response};
+use crate::common::{embed_message, ephemeral_text_message, response};
+use crate::core::{CoreCollector, CoreContext, CoreInteraction, CoreReplyHandle};
 use crate::{
-    common::{avatar_url, ephemeral_reply, name as get_name, pick_best_x_dice_rolls},
-    Context, Result, SUB_ROLE_ID,
+    common::{ephemeral_reply, pick_best_x_dice_rolls},
+    Context as DiscordContext, Result, SUB_ROLE_ID,
 };
 
 #[derive(Debug, Default)]
@@ -93,7 +96,7 @@ pub fn setup_dinos() -> Result<()> {
     guild_only,
     subcommands("hatch", "collection", "rename", "view", "gift", "slurp", "slurpening")
 )]
-pub async fn dino(_ctx: Context<'_>) -> Result<()> {
+pub async fn dino(_ctx: DiscordContext<'_>) -> Result<()> {
     Ok(())
 }
 
@@ -173,13 +176,13 @@ impl Timings {
 }
 
 struct DinoUser {
-    id: String,
+    id: UserId,
     record: UserRecord,
     timings: Timings,
 }
 
 impl DinoUser {
-    fn new(id: String, timings: Timings, record: UserRecord) -> Self {
+    fn new(id: UserId, timings: Timings, record: UserRecord) -> Self {
         Self {
             id,
             record,
@@ -190,49 +193,57 @@ impl DinoUser {
 
 /// Attempt to hatch a new dino.
 #[poise::command(slash_command, guild_only)]
-async fn hatch(ctx: Context<'_>) -> Result<()> {
+async fn hatch(ctx: DiscordContext<'_>) -> Result<()> {
+    hatch_impl(ctx).await
+}
+async fn hatch_impl<C: CoreContext>(ctx: C) -> Result<()> {
     let author = ctx.author();
-    let author_id = author.id.to_string();
+    let author_id = ctx.user_id(author);
 
     let db = &ctx.data().database;
-    let hatcher = get_user_record(&ctx.data().database, &author_id).await?;
-
+    let hatcher = get_user_record(db, author_id).await?;
     let user = DinoUser::new(author_id, Timings::hatch(&hatcher), hatcher);
 
-    if let Err(e) = user.timings.ensure_outside_cooldown() {
-        return bail_reply(ctx, e.to_string()).await;
+    if let Err(timeout_message) = user.timings.ensure_outside_cooldown() {
+        return ctx.bail(&timeout_message.to_string()).await;
     }
 
-    if let Err(e) = try_hatching(db, ctx, &user).await {
-        ctx.say(e.to_string()).await?;
-        return Ok(());
+    let author_member = ctx
+        .author_member()
+        .await
+        .expect("command was not used in a guild");
+    let author_is_sub = ctx.member_has_role(&author_member, SUB_ROLE_ID);
+
+    if let Err(fail_message) = try_hatching(db, &user, author_is_sub).await {
+        return ctx.bail(&fail_message.to_string()).await;
     }
 
     let Some(parts) = generate_dino(db).await? else {
         let msg =
             "I tried really hard but i wasn't able to make a unique dino for you. Sorry... :'(";
-        return bail_reply(ctx, msg).await;
+        return ctx.bail(msg).await;
     };
 
     let image_path = generate_dino_image(&parts)?;
 
     let mut transaction = ctx.data().database.begin().await?;
 
-    let dino = insert_dino(&mut transaction, &user.id, &parts, &image_path, None).await?;
-    update_last_user_action(&mut transaction, &user.id, UserAction::Hatch(0)).await?;
+    let dino = insert_dino(&mut transaction, user.id, &parts, &image_path, None).await?;
+    update_last_user_action(&mut transaction, user.id, UserAction::Hatch(0)).await?;
 
-    let author_name = get_name(&ctx, author).await;
-    let message = send_dino_embed(
-        ctx,
+    let reply = create_dino_embed_reply(
         &dino,
-        &author_name,
-        &avatar_url(author),
+        &ctx.user_name(author).await,
+        &ctx.user_avatar_url(author),
         &image_path,
         user.timings.attempt,
     )
     .await?;
 
-    update_hatch_message(&mut transaction, dino.id, &message).await?;
+    let reply_handle = ctx.reply_with_handle(reply).await?;
+    let message = reply_handle.message().await?;
+    let message_link = C::ReplyHandle::message_link(&message);
+    update_hatch_message(&mut transaction, dino.id, &message_link).await?;
 
     transaction.commit().await?;
 
@@ -242,36 +253,46 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
 /// View your dino collection.
 #[poise::command(slash_command, guild_only)]
 async fn collection(
-    ctx: Context<'_>,
+    ctx: DiscordContext<'_>,
     #[description = "The user's whose collection you want to view"] user: Option<User>,
     #[description = "The type of collection you want to view"] kind: Option<CollectionKind>,
     #[description = "Whether the message will be shown to everyone or not"] silent: Option<bool>,
+) -> Result<()> {
+    collection_impl(ctx, user, kind, silent).await
+}
+
+async fn collection_impl<C: CoreContext>(
+    ctx: C,
+    user: Option<C::User>,
+    kind: Option<CollectionKind>,
+    silent: Option<bool>,
 ) -> Result<()> {
     let silent = silent.unwrap_or(true);
     let kind = kind.unwrap_or(CollectionKind::All);
 
     let user_is_author = user.is_none();
     let user = user.as_ref().unwrap_or_else(|| ctx.author());
+    let user_id = ctx.user_id(user);
+    let user_name = ctx.user_name(user).await;
 
     let db = &ctx.data().database;
-    let dino_collection = fetch_collection(db, &user.id.to_string(), kind).await?;
+    let dino_collection = fetch_collection(db, user_id, kind).await?;
 
     if dino_collection.dinos.is_empty() {
         let content = match user_is_author {
             true => "You don't have any dinos :'(".to_string(),
-            false => format!("{} doesn't have any dinos :'(", get_name(&ctx, user).await),
+            false => format!("{} doesn't have any dinos :'(", user_name),
         };
-        return bail_reply(ctx, content).await;
+        return ctx.bail(&content).await;
     }
 
     let image = generate_dino_collection_image(&dino_collection.dinos)?;
-    let author_name = get_name(&ctx, user).await;
-    let filename = format!("{}_collection.png", user.name);
+    let filename = format!("{}_collection.png", user_id);
 
     let embed = CreateEmbed::default()
         .colour(0xffbf00)
-        .author(CreateEmbedAuthor::new(&author_name).icon_url(avatar_url(user)))
-        .title(format!("{}'s collection", &author_name))
+        .author(CreateEmbedAuthor::new(&user_name).icon_url(ctx.user_avatar_url(user)))
+        .title(format!("{}'s collection", &user_name))
         .description(dino_collection.description())
         .footer(CreateEmbedFooter::new(format!(
             "{}. They are worth: {} Bucks",
@@ -280,7 +301,7 @@ async fn collection(
         )))
         .attachment(&filename);
 
-    ctx.send(
+    ctx.reply(
         CreateReply::default()
             .embed(embed)
             .attachment(CreateAttachment::bytes(image, filename))
@@ -292,21 +313,27 @@ async fn collection(
 }
 
 /// Give your dino a better name.
-#[poise::command(slash_command, guild_only, prefix_command)]
+#[poise::command(guild_only, slash_command, prefix_command)]
 async fn rename(
-    ctx: Context<'_>,
+    ctx: DiscordContext<'_>,
     #[description = "The existing name of your dino"]
     #[autocomplete = "autocomplete_owned_dinos"]
     name: String,
     #[description = "The new name for your dino"] replacement: String,
 ) -> Result<()> {
+    rename_impl(ctx, name, replacement).await
+}
+
+async fn rename_impl(ctx: impl CoreContext, name: String, replacement: String) -> Result<()> {
     let Some(dino) = get_dino_record(&ctx.data().database, &name).await? else {
         let msg = "The name of the dino you specified was not found.";
-        return bail_reply(ctx, msg).await;
+        return ctx.bail(msg).await;
     };
 
-    if dino.owner_id != ctx.author().id.to_string().as_ref() {
-        return bail_reply(ctx, "You don't own this dino, you can't rename it.").await;
+    if dino.owner_id != ctx.user_id(ctx.author()).to_string() {
+        return ctx
+            .bail("You don't own this dino, you can't rename it.")
+            .await;
     }
 
     if let Err(e) = update_dino_name(&ctx.data().database, dino.id, &replacement).await {
@@ -314,13 +341,13 @@ async fn rename(
             // NOTE: 2067 is the code for a UNIQUE constraint error in Sqlite
             // https://www.sqlite.org/rescode.html#constraint_unique
             if sqlite_error.code() == Some("2067".into()) {
-                return bail_reply(ctx, "This name is already taken!").await;
+                return ctx.bail("This name is already taken!").await;
             }
         };
         return Err(e);
     }
 
-    ctx.send(ephemeral_reply(format!(
+    ctx.reply(ephemeral_reply(format!(
         "**{}** name has been update to **{}**!",
         dino.name, replacement
     )))
@@ -330,21 +357,25 @@ async fn rename(
 }
 
 /// View an existing dino.
-#[poise::command(slash_command, guild_only, prefix_command)]
+#[poise::command(guild_only, slash_command, prefix_command)]
 async fn view(
-    ctx: Context<'_>,
+    ctx: DiscordContext<'_>,
     #[description = "The name of the dino"]
     #[autocomplete = "autocomplete_all_dinos"]
     name: String,
 ) -> Result<()> {
+    view_impl(ctx, name).await
+}
+
+async fn view_impl(ctx: impl CoreContext, name: String) -> Result<()> {
     let Some(dino) = get_dino_record(&ctx.data().database, &name).await? else {
         let msg = "The name of the dino you specified was not found.";
-        return bail_reply(ctx, msg).await;
+        return ctx.bail(msg).await;
     };
 
     let owner_user_id = UserId::from_str(&dino.owner_id)?;
-    let (user_name, user_avatar) = match owner_user_id.to_user(&ctx).await {
-        Ok(user) => (get_name(&ctx, &user).await, avatar_url(&user)),
+    let (user_name, user_avatar) = match ctx.user_from_id(owner_user_id).await {
+        Ok(user) => (ctx.user_name(&user).await, ctx.user_avatar_url(&user)),
         Err(_) => {
             eprintln!("Could not find user with id: {owner_user_id}. Using a default owner name for this dino.");
             (
@@ -355,8 +386,7 @@ async fn view(
     };
     let image_path = Path::new(OUTPUT_PATH).join(&dino.filename);
 
-    send_dino_embed(
-        ctx,
+    let reply = create_dino_embed_reply(
         &dino,
         &user_name,
         &user_avatar,
@@ -365,47 +395,57 @@ async fn view(
     )
     .await?;
 
+    ctx.reply(reply).await?;
+
     Ok(())
 }
 
 /// Gift your dino to another chatter. How kind.
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn gift(
-    ctx: Context<'_>,
+    ctx: DiscordContext<'_>,
     #[description = "The name of the dino you want to give away"]
     #[autocomplete = "autocomplete_owned_dinos"]
     dino: String,
     #[description = "The person who will receive the dino"] recipient: User,
 ) -> Result<()> {
-    let user_record = get_user_record(&ctx.data().database, &ctx.author().id.to_string()).await?;
+    gift_impl(ctx, dino, recipient).await
+}
+
+async fn gift_impl<C: CoreContext>(ctx: C, dino: String, recipient: C::User) -> Result<()> {
+    let author = ctx.author();
+    let author_id = ctx.user_id(author);
+
+    let user_record = get_user_record(&ctx.data().database, author_id).await?;
     let timings = Timings::gift(&user_record);
 
     if let Err(e) = timings.ensure_outside_cooldown() {
-        return bail_reply(ctx, e.to_string()).await;
+        return ctx.bail(&e.to_string()).await;
     }
 
     let Some(dino_record) = get_dino_record(&ctx.data().database, &dino).await? else {
-        return bail_reply(ctx, "Could not find a dino named {dino}.").await;
+        return ctx
+            .bail(&format!("Could not find a dino named {dino}."))
+            .await;
     };
 
-    if dino_record.owner_id != ctx.author().id.to_string().as_ref() {
-        return bail_reply(ctx, "You cannot gift a dino you don't own.").await;
+    if dino_record.owner_id != author_id.to_string() {
+        return ctx.bail("You cannot gift a dino you don't own.").await;
     }
 
     let mut transaction = ctx.data().database.begin().await?;
-    let author_id = ctx.author().id.to_string();
 
     gift_dino(
         &mut transaction,
         dino_record.id,
-        &author_id,
-        &recipient.id.to_string(),
+        author_id,
+        ctx.user_id(&recipient),
     )
     .await?;
-    update_last_user_action(&mut transaction, &author_id, UserAction::Gift).await?;
+    update_last_user_action(&mut transaction, author_id, UserAction::Gift).await?;
 
-    let sender_name = get_name(&ctx, ctx.author()).await;
-    let receiver_name = get_name(&ctx, &recipient).await;
+    let sender_name = ctx.user_name(author).await;
+    let receiver_name = ctx.user_name(&recipient).await;
     let dino_name = if dino_record.hatch_message.is_empty() {
         dino
     } else {
@@ -416,7 +456,7 @@ async fn gift(
         "**{sender_name}** gifted {dino_name} to **{receiver_name}**! How kind!",
     ));
 
-    ctx.send(CreateReply::default().embed(embed)).await?;
+    ctx.reply(CreateReply::default().embed(embed)).await?;
 
     transaction.commit().await?;
 
@@ -426,7 +466,7 @@ async fn gift(
 /// Sacrifice two dinos to create a new one
 #[poise::command(guild_only, slash_command, prefix_command)]
 async fn slurp(
-    ctx: Context<'_>,
+    ctx: DiscordContext<'_>,
     #[description = "The first dino to be slurped"]
     #[autocomplete = "autocomplete_owned_dinos"]
     first: String,
@@ -434,44 +474,55 @@ async fn slurp(
     #[autocomplete = "autocomplete_owned_dinos"]
     second: String,
 ) -> Result<()> {
+    slurp_impl(ctx, first, second).await
+}
+
+async fn slurp_impl<C: CoreContext>(ctx: C, first: String, second: String) -> Result<()> {
     if first.trim() == second.trim() {
-        return bail_reply(ctx, "You can't slurp the same dino twice, you cheater!").await;
+        return ctx
+            .bail("You can't slurp the same dino twice, you cheater!")
+            .await;
     }
 
-    let user_record = get_user_record(&ctx.data().database, &ctx.author().id.to_string()).await?;
+    let author = ctx.author();
+    let author_id = ctx.user_id(author);
+    let user_record = get_user_record(&ctx.data().database, author_id).await?;
     let timings = Timings::slurp(&user_record);
 
     if let Err(e) = timings.ensure_outside_cooldown() {
-        return bail_reply(ctx, e.to_string()).await;
+        return ctx.bail(&e.to_string()).await;
     }
 
     let Some(first_dino) = get_dino_record(&ctx.data().database, &first).await? else {
-        return bail_reply(ctx, format!("Could not find a dino named {first}.")).await;
+        return ctx
+            .bail(&format!("Could not find a dino named {first}."))
+            .await;
     };
 
-    let author_id = ctx.author().id.to_string();
-
-    if first_dino.owner_id != author_id {
+    let str_author_id = author_id.to_string();
+    if first_dino.owner_id != str_author_id {
         let msg =
             format!("Doesn't seem you own {first}, are you trying to pull a fast one on me?!");
-        return bail_reply(ctx, msg).await;
+        return ctx.bail(&msg).await;
     }
 
     let Some(second_dino) = get_dino_record(&ctx.data().database, &second).await? else {
-        return bail_reply(ctx, format!("Could not find a dino named {second}.")).await;
+        return ctx
+            .bail(&format!("Could not find a dino named {second}."))
+            .await;
     };
 
-    if second_dino.owner_id != author_id {
+    if second_dino.owner_id != str_author_id {
         let msg =
             format!("Doesn't seem you own {second}, are you trying to pull a fast one on me?!");
-        return bail_reply(ctx, msg).await;
+        return ctx.bail(&msg).await;
     }
 
     let parts = generate_dino(&ctx.data().database).await?;
     if parts.is_none() {
         let msg =
             "I tried really hard but i wasn't able to make a unique dino for you. Sorry... :'(";
-        return bail_reply(ctx, msg).await;
+        return ctx.bail(msg).await;
     }
 
     let mut transaction = ctx.data().database.begin().await?;
@@ -481,21 +532,23 @@ async fn slurp(
     let parts = parts.unwrap();
     let image_path = generate_dino_image(&parts)?;
 
-    let dino = insert_dino(&mut transaction, &author_id, &parts, &image_path, None).await?;
-    update_last_user_action(&mut transaction, &author_id, UserAction::Slurp).await?;
+    let dino = insert_dino(&mut transaction, author_id, &parts, &image_path, None).await?;
+    update_last_user_action(&mut transaction, author_id, UserAction::Slurp).await?;
 
-    let author_name = get_name(&ctx, ctx.author()).await;
-    let message = send_dino_embed(
-        ctx,
+    let author_name = ctx.user_name(author).await;
+    let reply = create_dino_embed_reply(
         &dino,
         &author_name,
-        &avatar_url(ctx.author()),
+        &ctx.user_avatar_url(author),
         &image_path,
         Utc::now().naive_utc(),
     )
     .await?;
 
-    update_hatch_message(&mut transaction, dino.id, &message).await?;
+    let reply_handle = ctx.reply_with_handle(reply).await?;
+    let message = reply_handle.message().await?;
+    let message_link = C::ReplyHandle::message_link(&message);
+    update_hatch_message(&mut transaction, dino.id, &message_link).await?;
 
     transaction.commit().await?;
 
@@ -504,20 +557,24 @@ async fn slurp(
 
 /// Sacrifice all your non favourite dinos to create new ones (2 -> 1)
 #[poise::command(guild_only, slash_command, prefix_command)]
-async fn slurpening(ctx: Context<'_>) -> Result<()> {
-    let user_id = ctx.author().id.to_string();
-    let user_record = get_user_record(&ctx.data().database, &user_id).await?;
+async fn slurpening(ctx: DiscordContext<'_>) -> Result<()> {
+    slurpening_impl(ctx).await
+}
+
+async fn slurpening_impl<C: CoreContext>(ctx: C) -> Result<()> {
+    let author = ctx.author();
+    let author_id = ctx.user_id(author);
+    let user_record = get_user_record(&ctx.data().database, author_id).await?;
     let timings = Timings::slurp(&user_record);
 
     if let Err(e) = timings.ensure_outside_cooldown() {
-        return bail_reply(ctx, e.to_string()).await;
+        return ctx.bail(&e.to_string()).await;
     }
 
-    let mut sacrifices = get_non_favourites(&ctx.data().database, &user_id).await?;
-
+    let mut sacrifices = get_non_favourites(&ctx.data().database, author_id).await?;
     if sacrifices.len() < 2 {
         let msg = "You don't have enough trash dinos to slurp, the minimum is 2.";
-        return bail_reply(ctx, msg).await;
+        return ctx.bail(msg).await;
     }
 
     if sacrifices.len() % 2 == 1 {
@@ -545,7 +602,7 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
         .style(ButtonStyle::Danger);
 
     let reply_handle = ctx
-        .send(
+        .reply_with_handle(
             CreateReply::default()
                 .components(vec![CreateActionRow::Buttons(vec![confirm_button])])
                 .content(content)
@@ -553,43 +610,41 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
         )
         .await?;
 
-    while let Some(interaction) = reply_handle
-        .message()
-        .await?
-        .await_component_interaction(ctx)
-        .timeout(std::time::Duration::from_secs(10))
-        .await
-    {
-        if interaction.data.custom_id != "slurpening-confirm" {
-            continue;
-        }
+    let message = reply_handle.message().await?;
+    let message_id = C::ReplyHandle::message_id(&message);
 
+    let collector = &mut ctx
+        .create_collector()
+        .message_id(message_id)
+        .filter(Box::new(move |f: &C::Interaction| {
+            f.author_id() == author_id && f.custom_id() == "slurpening-confirm"
+        }))
+        .timeout(Duration::from_secs(30))
+        .stream();
+
+    'outer: while let Some(interaction) = collector.next().await {
         let mut transaction = ctx.data().database.begin().await?;
 
         for dino in sacrifices.iter() {
             delete_dino(&mut transaction, dino.id).await?;
         }
 
-        let message_link = interaction.message.link();
+        let message_link = C::ReplyHandle::message_link(&message);
 
         let mut created_dinos = Vec::with_capacity(num_to_create);
         for _ in 0..num_to_create {
             let Some(parts) = generate_dino(&ctx.data().database).await? else {
-                interaction
-                    .create_response(
-                        ctx,
-                        response(ephemeral_text_message(
-                            "Sorry but I couldn't generate a dino. Aborting slurpening.",
-                        )),
-                    )
+                let msg = "Sorry but I couldn't generate a dino. Aborting slurpening.";
+                ctx.respond(interaction, response(ephemeral_text_message(msg)))
                     .await?;
-                return Ok(());
+
+                continue 'outer;
             };
 
             let file_path = generate_dino_image(&parts)?;
             let inserted_dino = insert_dino(
                 &mut transaction,
-                &user_id,
+                author_id,
                 &parts,
                 &file_path,
                 Some(&message_link),
@@ -599,10 +654,10 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
         }
 
         let image = generate_dino_collection_image(&created_dinos)?;
-        let filename = format!("{}_collection.png", user_id);
+        let filename = format!("{}_collection.png", author_id);
 
-        let author_name = get_name(&ctx, ctx.author()).await;
-        let author_avatar = avatar_url(ctx.author());
+        let author_name = ctx.user_name(author).await;
+        let author_avatar = ctx.user_avatar_url(author);
 
         let new_dino_names = created_dinos
             .iter()
@@ -616,14 +671,13 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
             .description(format!("{num_to_create} dinos came out: {new_dino_names}."))
             .attachment(&filename);
 
-        interaction
-            .create_response(
-                ctx,
-                response(embed_message(embed).add_file(CreateAttachment::bytes(image, filename))),
-            )
-            .await?;
+        ctx.respond(
+            interaction,
+            response(embed_message(embed).add_file(CreateAttachment::bytes(image, filename))),
+        )
+        .await?;
 
-        update_last_user_action(&mut transaction, &user_id, UserAction::Slurp).await?;
+        update_last_user_action(&mut transaction, author_id, UserAction::Slurp).await?;
         transaction.commit().await?;
 
         return Ok(());
@@ -661,14 +715,14 @@ impl UserAction {
 
 async fn update_last_user_action(
     executor: impl SqliteExecutor<'_>,
-    user_id: &str,
+    user_id: UserId,
     action: UserAction,
 ) -> Result<()> {
     let mut query = QueryBuilder::new(format!(
         "UPDATE DinoUser SET {} WHERE id = ",
         action.to_update_query()
     ));
-    query.push_bind(user_id);
+    query.push_bind(user_id.to_string());
 
     query.build().execute(executor).await?;
 
@@ -841,13 +895,14 @@ struct UserRecord {
     consecutive_fails: i64,
 }
 
-async fn get_user_record(executor: impl SqliteExecutor<'_>, user_id: &str) -> Result<UserRecord> {
+async fn get_user_record(executor: impl SqliteExecutor<'_>, user_id: UserId) -> Result<UserRecord> {
+    let str_user_id = user_id.to_string();
     let row = sqlx::query_as!(
         UserRecord,
         r#"INSERT OR IGNORE INTO DinoUser (id) VALUES (?);
         SELECT last_hatch, last_slurp, last_gifting, consecutive_fails FROM DinoUser WHERE id = ?"#,
-        user_id,
-        user_id,
+        str_user_id,
+        str_user_id,
     )
     .fetch_one(executor)
     .await?;
@@ -857,7 +912,7 @@ async fn get_user_record(executor: impl SqliteExecutor<'_>, user_id: &str) -> Re
 
 async fn insert_dino(
     executor: impl SqliteExecutor<'_>,
-    user_id: &str,
+    user_id: UserId,
     parts: &DinoParts,
     file_path: &Path,
     message_link: Option<&str>,
@@ -867,6 +922,7 @@ async fn insert_dino(
     let eyes = get_file_name(&parts.eyes);
     let file_name = get_file_name(file_path);
     let message_link = message_link.unwrap_or_default();
+    let str_user_id = user_id.to_string();
 
     // NOTE: `query_as!` mistakenly interprets all string type fields as
     // nullable strings (when every field is marked NOT NULL), using
@@ -877,7 +933,7 @@ async fn insert_dino(
         (owner_id, name, filename, created_at, body, mouth, eyes, hatch_message)
         VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?)
         RETURNING *"#,
-        user_id,
+        str_user_id,
         parts.name,
         file_name,
         body,
@@ -995,9 +1051,10 @@ impl CollectionKind {
 
 async fn fetch_collection(
     executor: impl SqliteExecutor<'_> + Copy,
-    user_id: &str,
+    user_id: UserId,
     kind: CollectionKind,
 ) -> Result<DinoCollection> {
+    let user_id = &user_id.to_string();
     // NOTE: query gets reset to whatever was passed into new so I initialized
     // it to an empty string
     let mut query = QueryBuilder::new("");
@@ -1050,14 +1107,13 @@ async fn update_dino_name(db: &SqlitePool, dino_id: i64, new_name: &str) -> Resu
     Ok(())
 }
 
-async fn send_dino_embed(
-    ctx: Context<'_>,
+async fn create_dino_embed_reply(
     dino: &DinoRecord,
     owner_name: &str,
     owner_avatar: &str,
     image_path: &Path,
     created_at: NaiveDateTime,
-) -> Result<String> {
+) -> Result<CreateReply> {
     // let mut row = CreateActionRow::default();
     let covet = CreateButton::new(format!("{COVET_BUTTON}:{}", dino.id))
         .emoji('👍')
@@ -1073,6 +1129,7 @@ async fn send_dino_embed(
         .style(ButtonStyle::Secondary);
 
     let image_name = get_file_name(image_path);
+
     let embed = CreateEmbed::default()
         .colour(0x66ff99)
         .author(CreateEmbedAuthor::new(owner_name).icon_url(owner_avatar))
@@ -1089,26 +1146,23 @@ async fn send_dino_embed(
         )))
         .attachment(image_name);
 
-    let reply_handle = ctx
-        .send(
-            CreateReply::default()
-                .components(vec![CreateActionRow::Buttons(vec![covet, shun, favourite])])
-                .attachment(CreateAttachment::path(image_path).await?)
-                .embed(embed),
-        )
-        .await?;
+    let reply = CreateReply::default()
+        .components(vec![CreateActionRow::Buttons(vec![covet, shun, favourite])])
+        .attachment(CreateAttachment::path(image_path).await?)
+        .embed(embed);
 
-    let message_link = reply_handle.message().await?.link();
-
-    Ok(message_link)
+    Ok(reply)
 }
 
 async fn gift_dino(
     executor: impl SqliteExecutor<'_>,
     dino_id: i64,
-    gifter_id: &str,
-    recipient_id: &str,
+    gifter_id: UserId,
+    recipient_id: UserId,
 ) -> Result<()> {
+    let gifter_id = gifter_id.to_string();
+    let recipient_id = recipient_id.to_string();
+
     sqlx::query!(
         r#"INSERT OR IGNORE INTO DinoUser (id) VALUES (?);
         INSERT INTO DinoTransactions (dino_id, user_id, gifter_id, type)
@@ -1142,8 +1196,9 @@ async fn delete_dino(executor: impl SqliteExecutor<'_>, dino_id: i64) -> Result<
 
 async fn get_non_favourites(
     executor: impl SqliteExecutor<'_>,
-    user_id: &str,
+    user_id: UserId,
 ) -> Result<Vec<DinoRecord>> {
+    let user_id = user_id.to_string();
     let rows = sqlx::query_as!(
         DinoRecord,
         r#"INSERT OR IGNORE INTO DinoUser (id) VALUES (?);
@@ -1161,7 +1216,7 @@ async fn get_non_favourites(
 }
 
 async fn autocomplete_owned_dinos<'a>(
-    ctx: Context<'a>,
+    ctx: DiscordContext<'a>,
     partial: &'a str,
 ) -> impl Iterator<Item = String> + 'a {
     let owner_id = ctx.author().id.to_string();
@@ -1183,7 +1238,7 @@ async fn autocomplete_owned_dinos<'a>(
 }
 
 async fn autocomplete_all_dinos<'a>(
-    ctx: Context<'a>,
+    ctx: DiscordContext<'a>,
     partial: &'a str,
 ) -> impl Iterator<Item = String> + 'a {
     let partial = format!("%{partial}%");
@@ -1199,29 +1254,27 @@ async fn autocomplete_all_dinos<'a>(
     suggestions.into_iter().map(|r| r.name)
 }
 
-async fn roll_to_hatch(ctx: Context<'_>) -> Result<i64> {
+fn roll_to_hatch(is_user_sub: bool) -> i64 {
     let mut hatch_roll = pick_best_x_dice_rolls(4, 1, 1, None) as i64;
 
-    if let Some(guild_id) = ctx.guild_id() {
-        if ctx.author().has_role(ctx, guild_id, SUB_ROLE_ID).await? {
-            hatch_roll = hatch_roll.max(pick_best_x_dice_rolls(4, 1, 1, None) as i64);
-        }
+    if is_user_sub {
+        hatch_roll = hatch_roll.max(pick_best_x_dice_rolls(4, 1, 1, None) as i64);
     }
 
-    Ok(hatch_roll)
+    hatch_roll
 }
 
 async fn try_hatching(
     executor: impl SqliteExecutor<'_>,
-    ctx: Context<'_>,
     user: &DinoUser,
+    is_user_sub: bool,
 ) -> Result<()> {
-    let hatch_roll = roll_to_hatch(ctx).await?;
+    let hatch_roll = roll_to_hatch(is_user_sub);
 
     if hatch_roll <= (MAX_FAILED_HATCHES - user.record.consecutive_fails) {
         update_last_user_action(
             executor,
-            &ctx.author().id.to_string(),
+            user.id,
             UserAction::Hatch(user.record.consecutive_fails + 1),
         )
         .await?;

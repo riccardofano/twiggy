@@ -31,16 +31,17 @@ static IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 pub async fn duel(ctx: DiscordContext<'_>) -> Result<()> {
     duel_impl(ctx, &IN_PROGRESS).await
 }
-async fn duel_impl(ctx: impl CoreContext, in_progress: &AtomicBool) -> Result<()> {
+async fn duel_impl<C: CoreContext>(ctx: C, in_progress: &AtomicBool) -> Result<()> {
     let challenger = match find_challenger(&ctx, in_progress).await {
         Ok(challenger) => challenger,
-        Err(e) => return ctx.bail(e.to_string()).await,
+        Err(e) => return ctx.bail(&e.to_string()).await,
     };
 
     let reply_content = format!("{challenger} is looking for a duel, press the button to accept.");
     let builder = reply_with_buttons(reply_content, vec![create_accept_button()]);
     let reply_handle = ctx.reply_with_handle(builder).await?;
-    let message_id = reply_handle.message_id().await?;
+    let message = reply_handle.message().await?;
+    let message_id = C::ReplyHandle::message_id(&message);
 
     // Make sure the in_progress status gets updated even on failure
     in_progress.store(true, AtomicOrdering::Release);
@@ -211,7 +212,7 @@ async fn duelstats_impl(ctx: impl CoreContext) -> Result<()> {
     let conn = &mut ctx.acquire_db_connection().await?;
     let user_id = ctx.user_id(user);
     let Some(stats) = DuelStats::from_database(conn, user_id).await? else {
-        return ctx.bail("You have never dueled before.".to_string()).await;
+        return ctx.bail("You have never dueled before.").await;
     };
 
     let user_name = ctx.user_name(user).await;

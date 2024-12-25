@@ -5,6 +5,7 @@ use anyhow::{bail, Context as Ctx};
 use chrono::{NaiveDateTime, Utc};
 use poise::serenity_prelude::{EditRole, Member, Mention, Role};
 use rand::Rng;
+use serenity::all::RoleId;
 use sqlx::SqlitePool;
 use tokio::sync::Mutex;
 
@@ -19,7 +20,7 @@ use crate::{
 const DEFAULT_GAMBLE_FAIL_CHANCE: u8 = 15;
 const RANDOM_COLOR_COOLDOWN: Duration = Duration::from_secs(60 * 60);
 
-const ANCHOR_ROLE_ID: u64 = SUB_ROLE_ID;
+const ANCHOR_ROLE_ID: RoleId = SUB_ROLE_ID;
 
 #[poise::command(
     guild_only,
@@ -160,7 +161,7 @@ async fn change_color(
     let role = match guild.role_by_name(&role_name) {
         Some(role) => role.clone(),
         None => {
-            let Some(anchor_role) = guild.roles.get(&ANCHOR_ROLE_ID.into()) else {
+            let Some(anchor_role) = guild.roles.get(&ANCHOR_ROLE_ID) else {
                 bail!(
                     "The anchor role was not found, \
                 unable to create a role with at the correct position."
@@ -436,7 +437,7 @@ async fn reject_on_cooldown(ctx: Context<'_>) -> Result<()> {
 }
 
 async fn reject_non_subs(member: &Member) -> Result<()> {
-    if !member.roles.contains(&SUB_ROLE_ID.into()) {
+    if !member.roles.contains(&SUB_ROLE_ID) {
         bail!("Yay! You get to keep your white color!");
     }
 
