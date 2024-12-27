@@ -10,7 +10,7 @@ pub async fn icon(_ctx: Context<'_>) -> Result<()> {
 #[poise::command(guild_only, slash_command)]
 async fn create(
     ctx: Context<'_>,
-    #[description = "The emote to create an icon role frofm"] emoji: Emoji,
+    #[description = "Select an emoji from this server"] emoji: Emoji,
 ) -> Result<()> {
     let guild_id = ctx.guild_id().expect("/icon create was not run on a guild");
 
@@ -49,7 +49,8 @@ async fn create(
         )
         .await
     {
-        return bail_reply(ctx, format!("Failed to create `{role_name}` role. {e:?}")).await;
+        eprintln!("Failed to create {role_name}: {e:?}");
+        return bail_reply(ctx, format!("Failed to create `{role_name}` role.")).await;
     }
 
     ctx.say(success_message).await?;
