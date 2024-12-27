@@ -2,7 +2,7 @@ use serenity::all::{EditRole, Emoji, GuildId, RoleId};
 
 use crate::{common::bail_reply, Context, Result};
 
-#[poise::command(guild_only, slash_command, subcommands("create"))]
+#[poise::command(guild_only, slash_command, subcommands("create", "toggle"))]
 pub async fn icon(_ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
@@ -54,7 +54,7 @@ async fn create(
 }
 
 #[poise::command(guild_only, slash_command)]
-async fn join(
+async fn toggle(
     ctx: Context<'_>,
     #[description = "Select the emoji for the role you want to join"] emoji: Emoji,
 ) -> Result<()> {
@@ -70,13 +70,22 @@ async fn join(
         return bail_reply(ctx, "Failed to get your member information.").await;
     };
 
-    if let Err(e) = author.add_role(ctx, role_id).await {
-        eprintln!("Failed to join icon role: {e:?}");
-        let msg = format!("Failed to give you the `{role_name}` role, you may already have it.");
-        return bail_reply(ctx, msg).await;
-    };
-
-    bail_reply(ctx, format!("The `{role_name}` role has been added!")).await
+    match author.roles.iter().find(|&&r| r == role_id) {
+        Some(_) => {
+            if let Err(e) = author.remove_role(ctx, role_id).await {
+                eprintln!("Failed to remove the {role_name} role, {e:?}");
+                return bail_reply(ctx, "Failed to remove the role :(").await;
+            };
+            bail_reply(ctx, format!("The `{role_name}` role has been removed!")).await
+        }
+        None => {
+            if let Err(e) = author.add_role(ctx, role_id).await {
+                eprintln!("Failed to add the {role_name} role, {e:?}");
+                return bail_reply(ctx, "Failed to add the role :(").await;
+            };
+            bail_reply(ctx, format!("The `{role_name}` role has been added!")).await
+        }
+    }
 }
 
 fn to_role_name(icon_name: &str) -> String {
