@@ -13,6 +13,7 @@ pub async fn icon(_ctx: Context<'_>) -> Result<()> {
 // - It could be disabled because the boosts wore off
 // - It could be a gif so it's nitro only
 
+/// Mod only: Create icon role for this server
 #[poise::command(guild_only, slash_command)]
 async fn create(
     ctx: Context<'_>,
@@ -53,6 +54,31 @@ async fn create(
     Ok(())
 }
 
+/// Mod only: Delete icon role from the server
+#[poise::command(guild_only, slash_command)]
+async fn delete(
+    ctx: Context<'_>,
+    #[description = "Select an emoji from this server"] emoji: Emoji,
+) -> Result<()> {
+    let guild_id = ctx.guild_id().expect("/icon create was not run on a guild");
+
+    let role_name = to_role_name(&emoji.name);
+    let Some(role_id) = get_server_role(ctx, guild_id, &role_name).await else {
+        return bail_reply(ctx, format!("`{role_name}` doesn't exist.")).await;
+    };
+
+    if let Err(e) = guild_id.delete_role(ctx, role_id).await {
+        eprintln!("Failed to delete {role_name}: {e:?}");
+        return bail_reply(ctx, format!("Failed to delete `{role_name}` role.")).await;
+    }
+
+    ctx.say(format!("`{role_name}` was successfully removed!"))
+        .await?;
+
+    Ok(())
+}
+
+/// Add/Remove an icon role from your roles
 #[poise::command(guild_only, slash_command)]
 async fn toggle(
     ctx: Context<'_>,
