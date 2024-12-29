@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use crate::{Context, Result};
 
+use crate::common::uwuify;
 use anyhow::bail;
 use chrono::Utc;
 use rand::seq::SliceRandom;
@@ -37,6 +38,22 @@ pub async fn quote(
     let message = match generate_message(quote_id).await {
         Ok(message) => message,
         Err(e) => e.to_string(),
+    };
+
+    ctx.say(message).await?;
+
+    Ok(())
+}
+
+/// Get a wandom ow specific quote
+#[poise::command(slash_command, prefix_command)]
+pub async fn quwuote(
+    ctx: Context<'_>,
+    #[description = "Quote ID"] quote_id: Option<u64>,
+) -> Result<()> {
+    let message = match generate_message(quote_id).await {
+        Ok(message) => uwuify(&message),
+        Err(e) => uwuify(&e.to_string()),
     };
 
     ctx.say(message).await?;
