@@ -2592,6 +2592,7 @@ dependencies = [
  "poise",
  "rand",
  "rand_seeder",
+ "regex",
  "reqwest",
  "rpg-dice-roller",
  "serde",
