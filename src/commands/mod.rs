@@ -70,7 +70,8 @@ pub async fn initialize_commands(database: &sqlx::SqlitePool) -> Vec<Command<Dat
         rpg::rpg(),
         sudoku::sudoku(),
         uwu::uwu(),
-        icon::icon(),
+        icon::icon(),    // Mod commands for icon
+        icon::iconsub(), // Add/remove icon role
     ];
 
     match ask::initialize_app_id() {

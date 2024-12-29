@@ -2,7 +2,13 @@ use serenity::all::{EditRole, Emoji, GuildId, RoleId};
 
 use crate::{common::bail_reply, Context, Result};
 
-#[poise::command(guild_only, slash_command, subcommands("create", "delete", "toggle"))]
+#[poise::command(
+    guild_only,
+    slash_command,
+    subcommands("create", "delete"),
+    required_permissions = "ADMINISTRATOR",
+    default_member_permissions = "ADMINISTRATOR"
+)]
 pub async fn icon(_ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
@@ -13,8 +19,8 @@ pub async fn icon(_ctx: Context<'_>) -> Result<()> {
 // - It could be disabled because the boosts wore off
 // - It could be a gif so it's nitro only
 
-/// Mod only: Create icon role for this server
-#[poise::command(guild_only, slash_command, required_permissions = "ADMINISTRATOR")]
+/// MOD ONLY: Create icon role for this server
+#[poise::command(guild_only, slash_command)]
 async fn create(
     ctx: Context<'_>,
     #[description = "Select an emoji from this server"] emoji: Emoji,
@@ -54,8 +60,8 @@ async fn create(
     Ok(())
 }
 
-/// Mod only: Delete icon role from the server
-#[poise::command(guild_only, slash_command, required_permissions = "ADMINISTRATOR")]
+/// MOD ONLY: Delete icon role from the server
+#[poise::command(guild_only, slash_command)]
 async fn delete(
     ctx: Context<'_>,
     #[description = "Select an emoji from this server"] emoji: Emoji,
@@ -80,7 +86,7 @@ async fn delete(
 
 /// Add/Remove an icon role from your roles
 #[poise::command(guild_only, slash_command)]
-async fn toggle(
+pub async fn iconsub(
     ctx: Context<'_>,
     #[description = "Select the emoji for the role you want to join"] emoji: Emoji,
 ) -> Result<()> {
