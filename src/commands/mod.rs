@@ -13,6 +13,7 @@ mod rockpaperscissors;
 mod roll;
 mod rpg;
 mod sudoku;
+mod uwu;
 
 use crate::{Data, Error};
 use dino::setup_dinos;
@@ -66,6 +67,7 @@ pub async fn initialize_commands(database: &sqlx::SqlitePool) -> Vec<Command<Dat
         roll::roll(),
         rpg::rpg(),
         sudoku::sudoku(),
+        uwu::uwu(),
     ];
 
     match ask::initialize_app_id() {
