@@ -2,7 +2,7 @@ use serenity::all::{EditRole, Emoji, GuildId, RoleId};
 
 use crate::{common::bail_reply, Context, Result};
 
-#[poise::command(guild_only, slash_command, subcommands("create", "toggle"))]
+#[poise::command(guild_only, slash_command, subcommands("create", "delete", "toggle"))]
 pub async fn icon(_ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
@@ -14,7 +14,7 @@ pub async fn icon(_ctx: Context<'_>) -> Result<()> {
 // - It could be a gif so it's nitro only
 
 /// Mod only: Create icon role for this server
-#[poise::command(guild_only, slash_command)]
+#[poise::command(guild_only, slash_command, required_permissions = "ADMINISTRATOR")]
 async fn create(
     ctx: Context<'_>,
     #[description = "Select an emoji from this server"] emoji: Emoji,
@@ -55,7 +55,7 @@ async fn create(
 }
 
 /// Mod only: Delete icon role from the server
-#[poise::command(guild_only, slash_command)]
+#[poise::command(guild_only, slash_command, required_permissions = "ADMINISTRATOR")]
 async fn delete(
     ctx: Context<'_>,
     #[description = "Select an emoji from this server"] emoji: Emoji,
