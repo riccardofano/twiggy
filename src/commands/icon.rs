@@ -111,6 +111,10 @@ pub async fn iconsub(
             bail_reply(ctx, format!("The `{role_name}` role has been removed!")).await
         }
         None => {
+            if let Some(other_icon_roles) = get_member_icon_roles(ctx, &author).await {
+                author.remove_roles(ctx, &other_icon_roles).await?;
+            }
+
             if let Err(e) = author.add_role(ctx, role_id).await {
                 eprintln!("Failed to add the {role_name} role, {e:?}");
                 return bail_reply(ctx, "Failed to add the role :(").await;
@@ -143,4 +147,15 @@ async fn get_server_role(ctx: Context<'_>, guild_id: GuildId, role_name: &str) -
         .values()
         .find(|r| r.name == role_name)
         .map(|r| r.id)
+}
+
+async fn get_member_icon_roles(ctx: Context<'_>, member: &Member) -> Option<Vec<RoleId>> {
+    let roles = member
+        .roles(ctx)?
+        .into_iter()
+        .filter(|r| r.name.ends_with("[ICON]"))
+        .map(|r| r.id)
+        .collect::<Vec<_>>();
+
+    Some(roles)
 }
