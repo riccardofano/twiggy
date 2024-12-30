@@ -1,4 +1,4 @@
-use serenity::all::{EditRole, Emoji, GuildId, RoleId};
+use serenity::all::{EditRole, Emoji, GuildId, Member, RoleId};
 
 use crate::{common::bail_reply, Context, Result};
 
@@ -13,22 +13,16 @@ pub async fn icon(_ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
-// TODO: It's convenient to be able to tell the user to just pick the right emote in that way I have its name and id
-// But the user might not be able to use the emoji a role is tied to:
-// - It could have been removed
-// - It could be disabled because the boosts wore off
-// - It could be a gif so it's nitro only
-
 /// MOD ONLY: Create icon role for this server
 #[poise::command(guild_only, slash_command)]
 async fn create(
     ctx: Context<'_>,
-    #[description = "Select an emoji from this server"] emoji: Emoji,
+    #[description = "An emote from this server"] emote: String,
 ) -> Result<()> {
-    let guild_id = ctx.guild_id().expect("/icon create was not run on a guild");
+    let guild_id = ctx.guild_id().expect("/icon create was not run in a guild");
 
-    if !is_guild_emoji(ctx, guild_id, &emoji.name).await {
-        return bail_reply(ctx, format!("`{}` is not from this server!", emoji.name)).await;
+    let Some(emoji) = get_server_emoji(ctx, guild_id, &emote).await else {
+        return bail_reply(ctx, format!("`{}` is not from this server!", emote)).await;
     };
 
     let role_name = to_role_name(&emoji.name);
@@ -37,7 +31,7 @@ async fn create(
     }
 
     let success_message = format!(
-        "`{role_name}` was successfully created! Use /icon {} to join it.",
+        "`{role_name}` was successfully created! Use `/iconsub {}` to join it.",
         emoji.name
     );
 
@@ -64,11 +58,11 @@ async fn create(
 #[poise::command(guild_only, slash_command)]
 async fn delete(
     ctx: Context<'_>,
-    #[description = "Select an emoji from this server"] emoji: Emoji,
+    #[description = "An emote from this server"] emote: String,
 ) -> Result<()> {
-    let guild_id = ctx.guild_id().expect("/icon create was not run on a guild");
+    let guild_id = ctx.guild_id().expect("/icon delete was not run in a guild");
 
-    let role_name = to_role_name(&emoji.name);
+    let role_name = to_role_name(&emote);
     let Some(role_id) = get_server_role(ctx, guild_id, &role_name).await else {
         return bail_reply(ctx, format!("`{role_name}` doesn't exist.")).await;
     };
@@ -88,10 +82,10 @@ async fn delete(
 #[poise::command(guild_only, slash_command)]
 pub async fn iconsub(
     ctx: Context<'_>,
-    #[description = "Select the emoji for the role you want to join"] emoji: Emoji,
+    #[description = "Select the emoji for the role you want to join"] emote: String,
 ) -> Result<()> {
     let guild_id = ctx.guild_id().expect("/icon join was not run on a guild");
-    let role_name = to_role_name(&emoji.name);
+    let role_name = to_role_name(&emote);
 
     let Some(role_id) = get_server_role(ctx, guild_id, &role_name).await else {
         let msg = format!("The role {role_name} does not exist on this server.");
@@ -128,25 +122,18 @@ fn to_role_name(icon_name: &str) -> String {
     format!("{icon_name} [ICON]")
 }
 
-async fn is_guild_emoji(ctx: Context<'_>, guild_id: GuildId, emoji_name: &str) -> bool {
-    guild_id
-        .emojis(ctx)
-        .await
-        .expect("Failed to get emojis of this guild")
-        .iter()
-        .any(|e| e.name == emoji_name)
-}
-
 async fn get_server_role(ctx: Context<'_>, guild_id: GuildId, role_name: &str) -> Option<RoleId> {
-    let guild_roles = guild_id
-        .roles(ctx)
-        .await
-        .expect("Failed to roles for this guild");
+    let guild_roles = guild_id.roles(ctx).await.ok()?;
 
     guild_roles
         .values()
         .find(|r| r.name == role_name)
         .map(|r| r.id)
+}
+
+async fn get_server_emoji(ctx: Context<'_>, guild_id: GuildId, emoji: &str) -> Option<Emoji> {
+    let guild_emoji = guild_id.emojis(ctx).await.ok()?;
+    guild_emoji.into_iter().find(|e| e.name == emoji)
 }
 
 async fn get_member_icon_roles(ctx: Context<'_>, member: &Member) -> Option<Vec<RoleId>> {
