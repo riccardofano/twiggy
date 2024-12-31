@@ -4,6 +4,7 @@ mod common;
 use std::num::NonZeroUsize;
 
 use anyhow::Result;
+use common::bail_reply;
 use lru::LruCache;
 use poise::serenity_prelude::{self as serenity, FullEvent};
 use tokio::sync::{Mutex, RwLock};
@@ -78,6 +79,18 @@ async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
     match error {
         poise::FrameworkError::Command { error, .. } => {
             eprintln!("Command error: {}", error);
+        }
+        poise::FrameworkError::ArgumentParse {
+            error, input, ctx, ..
+        } => {
+            // Overrides the framework's default with same error message except usage info
+            // But it sends it as an ephemeral message instead of one visible to everyone.
+            let response = if let Some(input) = input {
+                format!("**Cannot parse `{}` as argument: {}**", input, error)
+            } else {
+                format!("**{}**", error)
+            };
+            bail_reply(ctx, response).await.unwrap();
         }
         _ => {
             if let Err(e) = poise::builtins::on_error(error).await {

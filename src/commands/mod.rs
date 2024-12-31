@@ -5,6 +5,7 @@ mod duel;
 mod dynamic_commands;
 mod eightball;
 mod embedpls;
+mod icon;
 mod itad;
 mod mixu;
 mod poll;
@@ -69,6 +70,8 @@ pub async fn initialize_commands(database: &sqlx::SqlitePool) -> Vec<Command<Dat
         rpg::rpg(),
         sudoku::sudoku(),
         uwu::uwu(),
+        icon::icon(),    // Mod commands for icon
+        icon::iconsub(), // Add/remove icon role
     ];
 
     match ask::initialize_app_id() {
