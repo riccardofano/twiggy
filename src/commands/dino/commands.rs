@@ -656,6 +656,7 @@ pub async fn dinomod(_ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Remove a dino from the database
 #[poise::command(guild_only, slash_command)]
 async fn purge(
     ctx: Context<'_>,
@@ -675,7 +676,7 @@ async fn purge(
     bail_reply(ctx, format!("{name} has been deleted!")).await
 }
 
-/// Reset hatch, gift, and/or slurp cooldowns.
+/// Reset hatch, gift, and/or slurp cooldowns
 #[poise::command(guild_only, slash_command)]
 async fn cooldown(
     ctx: Context<'_>,
@@ -697,6 +698,7 @@ async fn cooldown(
     Ok(())
 }
 
+/// Forcibly change a dino's owner
 #[poise::command(guild_only, slash_command)]
 async fn reassign(
     ctx: Context<'_>,
