@@ -1,4 +1,4 @@
-use chrono::{Duration, TimeDelta, Utc};
+use chrono::{TimeDelta, Utc};
 use rand::Rng;
 use serenity::all::{ButtonStyle, CreateActionRow, CreateButton, CreateMessage, Member, Message};
 
@@ -23,14 +23,18 @@ pub async fn sudoku(
     let Some(mut member) = ctx.author_member().await else {
         return bail_reply(ctx, "Could not get your member details.").await;
     };
+    let Some(permissions) = member.permissions else {
+        return bail_reply(ctx, "I was not able to find your permissions").await;
+    };
 
     let random_timeout = {
         let mut rng = rand::thread_rng();
         rng.gen_range(420..=690)
     };
 
-    let now = Utc::now();
-    let timeout_until = now + Duration::seconds(random_timeout);
+    let timeout_until = Utc::now()
+        .checked_add_signed(TimeDelta::seconds(random_timeout))
+        .unwrap();
     member
         .to_mut()
         .disable_communication_until_datetime(ctx, timeout_until.into())
@@ -47,6 +51,14 @@ pub async fn sudoku(
         timeout_until.timestamp()
     ))
     .await?;
+
+    // Provide an escape hatch for mods
+    if permissions.moderate_members() {
+        let message = jailbreak_message();
+        let handle = member.user.direct_message(ctx, message).await?;
+
+        listen_to_jailbreak_message(ctx, &handle, member.into_owned()).await;
+    }
 
     Ok(())
 }
