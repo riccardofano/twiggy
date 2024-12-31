@@ -2,6 +2,8 @@ use serenity::all::{EditRole, Emoji, GuildId, Member, RoleId};
 
 use crate::{common::bail_reply, Context, Result};
 
+const ROLE_SUFFIX: &str = "[ICON]";
+
 #[poise::command(
     guild_only,
     slash_command,
@@ -84,7 +86,7 @@ pub async fn iconsub(
     ctx: Context<'_>,
     #[description = "Select the emoji for the role you want to join"] emote: String,
 ) -> Result<()> {
-    let guild_id = ctx.guild_id().expect("/icon join was not run on a guild");
+    let guild_id = ctx.guild_id().expect("/iconsub was not run on a guild");
     let role_name = to_role_name(&emote);
 
     let Some(role_id) = get_server_role(ctx, guild_id, &role_name).await else {
@@ -119,7 +121,7 @@ pub async fn iconsub(
 }
 
 fn to_role_name(icon_name: &str) -> String {
-    format!("{icon_name} [ICON]")
+    format!("{icon_name} {ROLE_SUFFIX}")
 }
 
 async fn get_server_role(ctx: Context<'_>, guild_id: GuildId, role_name: &str) -> Option<RoleId> {
@@ -140,7 +142,7 @@ async fn get_member_icon_roles(ctx: Context<'_>, member: &Member) -> Option<Vec<
     let roles = member
         .roles(ctx)?
         .into_iter()
-        .filter(|r| r.name.ends_with("[ICON]"))
+        .filter(|r| r.name.ends_with(ROLE_SUFFIX))
         .map(|r| r.id)
         .collect::<Vec<_>>();
 
