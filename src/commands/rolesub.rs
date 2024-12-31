@@ -1,8 +1,8 @@
-use serenity::all::{EditRole, Emoji, GuildId, Member, RoleId};
+use serenity::all::{EditRole, GuildId, RoleId};
 
 use crate::{common::bail_reply, Context, Result};
 
-const ROLE_SUFFIX: &str = "[ICON]";
+const ROLE_SUFFIX: &str = "[BOT]";
 
 #[poise::command(
     guild_only,
@@ -11,60 +11,47 @@ const ROLE_SUFFIX: &str = "[ICON]";
     required_permissions = "ADMINISTRATOR",
     default_member_permissions = "ADMINISTRATOR"
 )]
-pub async fn icon(_ctx: Context<'_>) -> Result<()> {
+pub async fn role(_ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
-/// MOD ONLY: Create icon role for this server
+/// MOD ONLY: Create bot role for this server
 #[poise::command(guild_only, slash_command)]
 async fn create(
     ctx: Context<'_>,
-    #[description = "An emote from this server"] emote: String,
+    #[description = "Name of the role to create"] role: String,
 ) -> Result<()> {
-    let guild_id = ctx.guild_id().expect("/icon create was not run in a guild");
+    let guild_id = ctx.guild_id().expect("/role create was not run in a guild");
 
-    let Some(emoji) = get_server_emoji(ctx, guild_id, &emote).await else {
-        return bail_reply(ctx, format!("`{}` is not from this server!", emote)).await;
-    };
-
-    let role_name = to_role_name(&emoji.name);
+    let role_name = to_role_name(&role);
     if get_server_role(ctx, guild_id, &role_name).await.is_some() {
         return bail_reply(ctx, format!("`{role_name}` already exists.")).await;
     }
 
-    let success_message = format!(
-        "`{role_name}` was successfully created! Use `/iconsub {}` to join it.",
-        emoji.name
-    );
-
     if let Err(e) = guild_id
-        .create_role(
-            ctx,
-            EditRole::default()
-                .name(&role_name)
-                .unicode_emoji(Some(emoji.name))
-                .mentionable(false),
-        )
+        .create_role(ctx, EditRole::default().name(&role_name).mentionable(true))
         .await
     {
         eprintln!("Failed to create {role_name}: {e:?}");
         return bail_reply(ctx, format!("Failed to create `{role_name}` role.")).await;
     }
 
+    let success_message =
+        format!("`{role_name}` was successfully created! Use `/rolesub {role}` to join it.",);
     ctx.say(success_message).await?;
 
     Ok(())
 }
 
-/// MOD ONLY: Delete icon role from the server
+/// MOD ONLY: Delete bot role from the server
 #[poise::command(guild_only, slash_command)]
 async fn delete(
     ctx: Context<'_>,
-    #[description = "An emote from this server"] emote: String,
+    #[description = "The name of the role to be deleted"] role: String,
 ) -> Result<()> {
-    let guild_id = ctx.guild_id().expect("/icon delete was not run in a guild");
+    let guild_id = ctx.guild_id().expect("/role delete was not run in a guild");
 
-    let role_name = to_role_name(&emote);
+    let role_name = to_role_name(&role);
     let Some(role_id) = get_server_role(ctx, guild_id, &role_name).await else {
         return bail_reply(ctx, format!("`{role_name}` doesn't exist.")).await;
     };
@@ -80,14 +67,14 @@ async fn delete(
     Ok(())
 }
 
-/// Add/Remove an icon role from your roles
+/// Add/Remove a bot role from your roles
 #[poise::command(guild_only, slash_command)]
-pub async fn iconsub(
+pub async fn rolesub(
     ctx: Context<'_>,
-    #[description = "Select the emoji for the role you want to join"] emote: String,
+    #[description = "Select the emoji for the role you want to join"] role: String,
 ) -> Result<()> {
-    let guild_id = ctx.guild_id().expect("/iconsub was not run on a guild");
-    let role_name = to_role_name(&emote);
+    let guild_id = ctx.guild_id().expect("/rolesub was not run on a guild");
+    let role_name = to_role_name(&role);
 
     let Some(role_id) = get_server_role(ctx, guild_id, &role_name).await else {
         let msg = format!("The role {role_name} does not exist on this server.");
@@ -107,10 +94,6 @@ pub async fn iconsub(
             bail_reply(ctx, format!("The `{role_name}` role has been removed!")).await
         }
         None => {
-            if let Some(other_icon_roles) = get_member_icon_roles(ctx, &author).await {
-                author.remove_roles(ctx, &other_icon_roles).await?;
-            }
-
             if let Err(e) = author.add_role(ctx, role_id).await {
                 eprintln!("Failed to add the {role_name} role, {e:?}");
                 return bail_reply(ctx, "Failed to add the role :(").await;
@@ -120,8 +103,8 @@ pub async fn iconsub(
     }
 }
 
-fn to_role_name(icon_name: &str) -> String {
-    format!("{icon_name} {ROLE_SUFFIX}")
+fn to_role_name(role_name: &str) -> String {
+    format!("{role_name} {ROLE_SUFFIX}")
 }
 
 async fn get_server_role(ctx: Context<'_>, guild_id: GuildId, role_name: &str) -> Option<RoleId> {
@@ -131,20 +114,4 @@ async fn get_server_role(ctx: Context<'_>, guild_id: GuildId, role_name: &str) -
         .values()
         .find(|r| r.name == role_name)
         .map(|r| r.id)
-}
-
-async fn get_server_emoji(ctx: Context<'_>, guild_id: GuildId, emoji: &str) -> Option<Emoji> {
-    let guild_emoji = guild_id.emojis(ctx).await.ok()?;
-    guild_emoji.into_iter().find(|e| e.name == emoji)
-}
-
-async fn get_member_icon_roles(ctx: Context<'_>, member: &Member) -> Option<Vec<RoleId>> {
-    let roles = member
-        .roles(ctx)?
-        .into_iter()
-        .filter(|r| r.name.ends_with(ROLE_SUFFIX))
-        .map(|r| r.id)
-        .collect::<Vec<_>>();
-
-    Some(roles)
 }

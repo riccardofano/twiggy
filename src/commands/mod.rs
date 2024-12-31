@@ -11,6 +11,7 @@ mod mixu;
 mod poll;
 mod quote;
 mod rockpaperscissors;
+mod rolesub;
 mod roll;
 mod rpg;
 mod sudoku;
@@ -70,8 +71,10 @@ pub async fn initialize_commands(database: &sqlx::SqlitePool) -> Vec<Command<Dat
         rpg::rpg(),
         sudoku::sudoku(),
         uwu::uwu(),
-        icon::icon(),    // Mod commands for icon
-        icon::iconsub(), // Add/remove icon role
+        icon::icon(),       // Mod commands for icon
+        icon::iconsub(),    // Add/remove icon role
+        rolesub::role(),    // Mod commands for rolesub
+        rolesub::rolesub(), // Add/remove bot role
     ];
 
     match ask::initialize_app_id() {
