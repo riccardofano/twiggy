@@ -7,6 +7,7 @@ use poise::serenity_prelude::{
 };
 use poise::CreateReply;
 use rand::{seq::SliceRandom, thread_rng};
+use serenity::all::Member;
 use sqlx::error::DatabaseError;
 use sqlx::sqlite::SqliteError;
 use sqlx::{FromRow, QueryBuilder, Row, Sqlite, SqliteExecutor, SqlitePool};
@@ -189,7 +190,7 @@ impl DinoUser {
 }
 
 /// Attempt to hatch a new dino.
-#[poise::command(slash_command, guild_only)]
+#[poise::command(guild_only, slash_command)]
 async fn hatch(ctx: Context<'_>) -> Result<()> {
     let author = ctx.author();
     let author_id = author.id.to_string();
@@ -240,7 +241,7 @@ async fn hatch(ctx: Context<'_>) -> Result<()> {
 }
 
 /// View your dino collection.
-#[poise::command(slash_command, guild_only)]
+#[poise::command(guild_only, slash_command)]
 async fn collection(
     ctx: Context<'_>,
     #[description = "The user's whose collection you want to view"] user: Option<User>,
@@ -276,7 +277,7 @@ async fn collection(
         .footer(CreateEmbedFooter::new(format!(
             "{}. They are worth: {} Bucks",
             dino_collection.count_as_string(),
-            dino_collection.transaction_count
+            quirkify_worth(dino_collection.transaction_count)
         )))
         .attachment(&filename);
 
@@ -292,7 +293,7 @@ async fn collection(
 }
 
 /// Give your dino a better name.
-#[poise::command(slash_command, guild_only, prefix_command)]
+#[poise::command(guild_only, slash_command)]
 async fn rename(
     ctx: Context<'_>,
     #[description = "The existing name of your dino"]
@@ -330,7 +331,7 @@ async fn rename(
 }
 
 /// View an existing dino.
-#[poise::command(slash_command, guild_only, prefix_command)]
+#[poise::command(guild_only, slash_command)]
 async fn view(
     ctx: Context<'_>,
     #[description = "The name of the dino"]
@@ -369,7 +370,7 @@ async fn view(
 }
 
 /// Gift your dino to another chatter. How kind.
-#[poise::command(guild_only, slash_command, prefix_command)]
+#[poise::command(guild_only, slash_command)]
 async fn gift(
     ctx: Context<'_>,
     #[description = "The name of the dino you want to give away"]
@@ -424,7 +425,7 @@ async fn gift(
 }
 
 /// Sacrifice two dinos to create a new one
-#[poise::command(guild_only, slash_command, prefix_command)]
+#[poise::command(guild_only, slash_command)]
 async fn slurp(
     ctx: Context<'_>,
     #[description = "The first dino to be slurped"]
@@ -503,7 +504,7 @@ async fn slurp(
 }
 
 /// Sacrifice all your non favourite dinos to create new ones (2 -> 1)
-#[poise::command(guild_only, slash_command, prefix_command)]
+#[poise::command(guild_only, slash_command)]
 async fn slurpening(ctx: Context<'_>) -> Result<()> {
     let user_id = ctx.author().id.to_string();
     let user_record = get_user_record(&ctx.data().database, &user_id).await?;
@@ -640,6 +641,97 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
+/**
+ * MOD ONLY COMMANDS
+ */
+
+#[poise::command(
+    guild_only,
+    slash_command,
+    subcommands("purge", "cooldown", "reassign"),
+    required_permissions = "MODERATE_MEMBERS",
+    default_member_permissions = "MODERATE_MEMBERS"
+)]
+pub async fn dinomod(_ctx: Context<'_>) -> Result<()> {
+    Ok(())
+}
+
+/// Remove a dino from the database
+#[poise::command(guild_only, slash_command)]
+async fn purge(
+    ctx: Context<'_>,
+    #[description = "Name of the dino to delete"]
+    #[autocomplete = "autocomplete_all_dinos"]
+    name: String,
+) -> Result<()> {
+    let db = &ctx.data().database;
+    let Some(dino) = get_dino_record(db, &name).await? else {
+        return bail_reply(ctx, "I couldn't find a dino with that name.").await;
+    };
+
+    sqlx::query!("DELETE FROM Dino WHERE id = ?", dino.id)
+        .execute(db)
+        .await?;
+
+    bail_reply(ctx, format!("{name} has been deleted!")).await
+}
+
+/// Reset hatch, gift, and/or slurp cooldowns
+#[poise::command(guild_only, slash_command)]
+async fn cooldown(
+    ctx: Context<'_>,
+    #[description = "The chatter whose cooldowns should be reset"] chatter: Member,
+    #[description = "The type of cooldown that should be reset"] cooldown: CooldownRemovalKind,
+) -> Result<()> {
+    let db = &ctx.data().database;
+
+    let mut query = QueryBuilder::new(format!(
+        "UPDATE DinoUser SET {} WHERE id = ",
+        cooldown.to_update_query()
+    ));
+    query.push_bind(chatter.user.id.to_string());
+    query.build().execute(db).await?;
+
+    let msg = format!("{} reset {cooldown} cooldown for {chatter}.", ctx.author());
+    ctx.say(msg).await?;
+
+    Ok(())
+}
+
+/// Forcibly change a dino's owner
+#[poise::command(guild_only, slash_command)]
+async fn reassign(
+    ctx: Context<'_>,
+    #[description = "Name of the dino to reassign"]
+    #[autocomplete = "autocomplete_all_dinos"]
+    dino: String,
+    #[description = "The chatter who is going to receive it"] chatter: Member,
+) -> Result<()> {
+    let db = &ctx.data().database;
+
+    let Some(dino_record) = get_dino_record(db, &dino).await? else {
+        return bail_reply(ctx, "I couldn't find a dino with that name.").await;
+    };
+
+    if let Err(e) = gift_dino(
+        db,
+        dino_record.id,
+        &ctx.author().id.to_string(),
+        &chatter.user.id.to_string(),
+    )
+    .await
+    {
+        let chatter_name = chatter.user.name;
+        eprintln!("Failed to reassign {dino} dino to {chatter_name}: {e:?}",);
+        return bail_reply(ctx, "Failed to reassign dino.").await;
+    };
+
+    ctx.say(format!("{dino} was reassigned to {chatter}"))
+        .await?;
+
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy)]
 enum UserAction {
     Hatch(i64),
@@ -656,6 +748,37 @@ impl UserAction {
             UserAction::Slurp => "last_slurp = datetime('now')".to_string(),
             UserAction::Gift => "last_gifting = datetime('now')".to_string(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, poise::ChoiceParameter)]
+enum CooldownRemovalKind {
+    Hatch,
+    Gift,
+    Slurp,
+    All,
+}
+
+impl CooldownRemovalKind {
+    fn to_update_query(self) -> &'static str {
+        match self {
+            CooldownRemovalKind::Hatch => "last_hatch = 0",
+            CooldownRemovalKind::Gift => "last_gifting = 0",
+            CooldownRemovalKind::Slurp => "last_slurp = 0",
+            CooldownRemovalKind::All => "last_hatch = 0, last_gifting = 0, last_slurp = 0",
+        }
+    }
+}
+
+impl std::fmt::Display for CooldownRemovalKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let thingy = match self {
+            CooldownRemovalKind::Hatch => "hatch",
+            CooldownRemovalKind::Gift => "gift",
+            CooldownRemovalKind::Slurp => "slurp",
+            CooldownRemovalKind::All => "all",
+        };
+        write!(f, "{thingy}")
     }
 }
 
@@ -1013,7 +1136,7 @@ async fn fetch_collection(
     query.reset();
 
     // FIXME: there's probably a better way to get this but this will do for now
-    query.push("SELECT COUNT(*), TOTAL(worth) FROM Dino ");
+    query.push("SELECT COUNT(*), TOTAL(owners) FROM Dino ");
     kind.push_to_query(&mut query, user_id);
 
     let row = query.build().fetch_one(executor).await?;
