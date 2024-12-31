@@ -277,7 +277,7 @@ async fn collection(
         .footer(CreateEmbedFooter::new(format!(
             "{}. They are worth: {} Bucks",
             dino_collection.count_as_string(),
-            dino_collection.transaction_count
+            quirkify_worth(dino_collection.transaction_count)
         )))
         .attachment(&filename);
 
@@ -698,8 +698,36 @@ async fn cooldown(
 }
 
 #[poise::command(guild_only, slash_command)]
-async fn reassign(ctx: Context<'_>) -> Result<()> {
-    todo!();
+async fn reassign(
+    ctx: Context<'_>,
+    #[description = "Name of the dino to reassign"]
+    #[autocomplete = "autocomplete_all_dinos"]
+    dino: String,
+    #[description = "The chatter who is going to receive it"] chatter: Member,
+) -> Result<()> {
+    let db = &ctx.data().database;
+
+    let Some(dino_record) = get_dino_record(db, &dino).await? else {
+        return bail_reply(ctx, "I couldn't find a dino with that name.").await;
+    };
+
+    if let Err(e) = gift_dino(
+        db,
+        dino_record.id,
+        &ctx.author().id.to_string(),
+        &chatter.user.id.to_string(),
+    )
+    .await
+    {
+        let chatter_name = chatter.user.name;
+        eprintln!("Failed to reassign {dino} dino to {chatter_name}: {e:?}",);
+        return bail_reply(ctx, "Failed to reassign dino.").await;
+    };
+
+    ctx.say(format!("{dino} was reassigned to {chatter}"))
+        .await?;
+
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1106,7 +1134,7 @@ async fn fetch_collection(
     query.reset();
 
     // FIXME: there's probably a better way to get this but this will do for now
-    query.push("SELECT COUNT(*), TOTAL(worth) FROM Dino ");
+    query.push("SELECT COUNT(*), TOTAL(owners) FROM Dino ");
     kind.push_to_query(&mut query, user_id);
 
     let row = query.build().fetch_one(executor).await?;
