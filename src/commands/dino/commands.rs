@@ -7,6 +7,7 @@ use poise::serenity_prelude::{
 };
 use poise::CreateReply;
 use rand::{seq::SliceRandom, thread_rng};
+use serenity::all::Member;
 use sqlx::error::DatabaseError;
 use sqlx::sqlite::SqliteError;
 use sqlx::{FromRow, QueryBuilder, Row, Sqlite, SqliteExecutor, SqlitePool};
@@ -648,8 +649,8 @@ async fn slurpening(ctx: Context<'_>) -> Result<()> {
     guild_only,
     slash_command,
     subcommands("purge", "cooldown", "reassign"),
-    required_permissions = "ADMINISTRATOR",
-    default_member_permissions = "ADMINISTRATOR"
+    required_permissions = "MODERATE_MEMBERS",
+    default_member_permissions = "MODERATE_MEMBERS"
 )]
 pub async fn dinomod(_ctx: Context<'_>) -> Result<()> {
     Ok(())
@@ -674,19 +675,32 @@ async fn purge(
     bail_reply(ctx, format!("{name} has been deleted!")).await
 }
 
+/// Reset hatch, gift, and/or slurp cooldowns.
 #[poise::command(guild_only, slash_command)]
-async fn cooldown(ctx: Context<'_>) -> Result<()> {
-    todo!();
+async fn cooldown(
+    ctx: Context<'_>,
+    #[description = "The chatter whose cooldowns should be reset"] chatter: Member,
+    #[description = "The type of cooldown that should be reset"] cooldown: CooldownRemovalKind,
+) -> Result<()> {
+    let db = &ctx.data().database;
+
+    let mut query = QueryBuilder::new(format!(
+        "UPDATE DinoUser SET {} WHERE id = ",
+        cooldown.to_update_query()
+    ));
+    query.push_bind(chatter.user.id.to_string());
+    query.build().execute(db).await?;
+
+    let msg = format!("{} reset {cooldown} cooldown for {chatter}.", ctx.author());
+    ctx.say(msg).await?;
+
+    Ok(())
 }
 
 #[poise::command(guild_only, slash_command)]
 async fn reassign(ctx: Context<'_>) -> Result<()> {
     todo!();
 }
-
-/**
- * END OF MOD ONLY COMMANDS
- */
 
 #[derive(Debug, Clone, Copy)]
 enum UserAction {
@@ -704,6 +718,37 @@ impl UserAction {
             UserAction::Slurp => "last_slurp = datetime('now')".to_string(),
             UserAction::Gift => "last_gifting = datetime('now')".to_string(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, poise::ChoiceParameter)]
+enum CooldownRemovalKind {
+    Hatch,
+    Gift,
+    Slurp,
+    All,
+}
+
+impl CooldownRemovalKind {
+    fn to_update_query(self) -> &'static str {
+        match self {
+            CooldownRemovalKind::Hatch => "last_hatch = 0",
+            CooldownRemovalKind::Gift => "last_gifting = 0",
+            CooldownRemovalKind::Slurp => "last_slurp = 0",
+            CooldownRemovalKind::All => "last_hatch = 0, last_gifting = 0, last_slurp = 0",
+        }
+    }
+}
+
+impl std::fmt::Display for CooldownRemovalKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let thingy = match self {
+            CooldownRemovalKind::Hatch => "hatch",
+            CooldownRemovalKind::Gift => "gift",
+            CooldownRemovalKind::Slurp => "slurp",
+            CooldownRemovalKind::All => "all",
+        };
+        write!(f, "{thingy}")
     }
 }
 
