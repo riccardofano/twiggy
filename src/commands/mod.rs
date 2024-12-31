@@ -70,6 +70,7 @@ pub async fn initialize_commands(database: &sqlx::SqlitePool) -> Vec<Command<Dat
         roll::roll(),
         rpg::rpg(),
         sudoku::sudoku(),
+        sudoku::timeout(),
         uwu::uwu(),
         icon::icon(),       // Mod commands for icon
         icon::iconsub(),    // Add/remove icon role
