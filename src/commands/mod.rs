@@ -100,7 +100,10 @@ pub async fn initialize_commands(database: &sqlx::SqlitePool) -> Vec<Command<Dat
     }
 
     match setup_dinos() {
-        Ok(_) => commands.push(dino::dino()),
+        Ok(_) => {
+            commands.push(dino::dino());
+            commands.push(dino::dinomod());
+        },
         Err(e) => eprintln!("[WARNING] /dino commands were disabled because something went wrong while setting the fragments: {e}")
     }
 
