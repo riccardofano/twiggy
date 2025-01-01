@@ -1,6 +1,7 @@
 use chrono::{TimeDelta, Utc};
 use rand::Rng;
 use serenity::all::{ButtonStyle, CreateActionRow, CreateButton, CreateMessage, Member, Message};
+use sqlx::SqlitePool;
 
 use crate::common::{bail_reply, name, text_message, update_response};
 use crate::{Context, Result};
@@ -119,6 +120,41 @@ pub async fn timeout(
     Ok(())
 }
 
+/// Reset a chatter's cooldown and/or remove their timeout
+#[poise::command(
+    guild_only,
+    slash_command,
+    required_permissions = "MODERATE_MEMBERS",
+    default_member_permissions = "MODERATE_MEMBERS"
+)]
+pub async fn pardon(
+    ctx: Context<'_>,
+    #[description = "The chatter you want to pardon"] mut chatter: Member,
+    #[description = "The kind of action you want to reset"] kind: Option<PardonKind>,
+) -> Result<()> {
+    let db = &ctx.data().database;
+    let kind = kind.unwrap_or(PardonKind::All);
+
+    match kind {
+        PardonKind::Timeout => {
+            pardon_timeout(ctx, &mut chatter).await?;
+        }
+        PardonKind::Rpg => {
+            pardon_rpg_loss(db, &mut chatter).await?;
+        }
+        PardonKind::DuelAndColor => {
+            pardon_duel_loss(db, &mut chatter).await?;
+        }
+        PardonKind::All => {
+            pardon_timeout(ctx, &mut chatter).await?;
+            pardon_rpg_loss(db, &mut chatter).await?;
+            pardon_duel_loss(db, &mut chatter).await?;
+        }
+    }
+
+    bail_reply(ctx, "All done :)").await
+}
+
 fn jailbreak_message() -> CreateMessage {
     let btn = CreateButton::new("pardon-btn")
         .emoji('⛏')
@@ -156,4 +192,52 @@ async fn listen_to_jailbreak_message(ctx: Context<'_>, handle: &Message, mut cha
 
         break;
     }
+}
+
+#[derive(Debug, Clone, Copy, poise::ChoiceParameter)]
+enum PardonKind {
+    Timeout,
+    Rpg,
+    DuelAndColor,
+    All,
+}
+
+async fn pardon_timeout(ctx: Context<'_>, chatter: &mut Member) -> Result<()> {
+    let timeout_expiration = chatter.communication_disabled_until.unwrap_or_default();
+    if Utc::now() >= timeout_expiration.to_utc() {
+        // Don't return an error because if might have been a "pardon all"
+        // request and I don't want to interrupt the process, it doesn't matter
+        // if the user wasn't actually untimed out.
+        return Ok(());
+    }
+
+    chatter.enable_communication(ctx).await?;
+
+    Ok(())
+}
+
+async fn pardon_rpg_loss(db: &SqlitePool, chatter: &mut Member) -> Result<()> {
+    let user_id = chatter.user.id.to_string();
+
+    sqlx::query!(
+        "UPDATE OR IGNORE RPGCharacter SET last_loss = 0 WHERE user_id = ?",
+        user_id
+    )
+    .execute(db)
+    .await?;
+
+    Ok(())
+}
+
+async fn pardon_duel_loss(db: &SqlitePool, chatter: &mut Member) -> Result<()> {
+    let user_id = chatter.user.id.to_string();
+
+    sqlx::query!(
+        "UPDATE OR IGNORE User SET last_loss = 0 WHERE id = ?",
+        user_id
+    )
+    .execute(db)
+    .await?;
+
+    Ok(())
 }

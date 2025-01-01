@@ -14,7 +14,7 @@ mod rockpaperscissors;
 mod rolesub;
 mod roll;
 mod rpg;
-mod sudoku;
+mod timeout;
 mod uwu;
 
 use crate::{Data, Error};
@@ -69,8 +69,9 @@ pub async fn initialize_commands(database: &sqlx::SqlitePool) -> Vec<Command<Dat
         rockpaperscissors::rps(),
         roll::roll(),
         rpg::rpg(),
-        sudoku::sudoku(),
-        sudoku::timeout(),
+        timeout::pardon(),
+        timeout::sudoku(),
+        timeout::timeout(),
         uwu::uwu(),
         icon::icon(),       // Mod commands for icon
         icon::iconsub(),    // Add/remove icon role
