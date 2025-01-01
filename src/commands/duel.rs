@@ -5,24 +5,22 @@ use crate::common::{
 use crate::Context;
 
 use anyhow::{bail, Context as AnyhowContext, Result};
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, TimeDelta, Utc};
 use poise::serenity_prelude::{
     ButtonStyle, CreateActionRow, CreateButton, CreateEmbed, CreateEmbedAuthor, Member, User,
     UserId,
 };
 use poise::{CreateReply, ReplyHandle};
 use rand::Rng;
-use serenity::all::{ComponentInteraction, ComponentInteractionCollector, MessageId};
+use serenity::all::{ComponentInteraction, ComponentInteractionCollector, Mentionable, MessageId};
 use sqlx::{Connection, SqliteExecutor, Transaction};
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
-use std::time::Duration;
 
-// TODO: this should be replaced with a const chrono::Duration when that gets stabilized
-const LOSS_COOLDOWN: i64 = 60;
-const DEAD_DUEL_COOLDOWN: Duration = Duration::from_secs(5 * 60);
-const TIMEOUT_DURATION: Duration = Duration::from_secs(10 * 60);
+const LOSS_COOLDOWN: TimeDelta = TimeDelta::minutes(10);
+const DEAD_DUEL_COOLDOWN: TimeDelta = TimeDelta::minutes(5);
+const TIMEOUT_DURATION: TimeDelta = TimeDelta::minutes(10);
 
 static IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
@@ -85,19 +83,19 @@ async fn run_duel(
             let (winner_id, loser_id) = (&challenger.string_id, &accepter.string_id);
             update_users_win_loss(&mut transaction, winner_id, loser_id).await?;
 
-            format!("{challenger} has won!")
+            format!("{} has won!", challenger.id.mention())
         }
         Ordering::Less => {
             let (winner_id, loser_id) = (&accepter.string_id, &challenger.string_id);
             update_users_win_loss(&mut transaction, winner_id, loser_id).await?;
 
-            format!("{accepter} has won!")
+            format!("{} has won!", accepter.id.mention())
         }
         Ordering::Equal => {
             update_users_drawn(&mut transaction, &challenger.string_id, &accepter.string_id)
                 .await?;
 
-            let timeout_end_time = Utc::now() + chrono::Duration::from_std(TIMEOUT_DURATION)?;
+            let timeout_end_time = Utc::now().checked_add_signed(TIMEOUT_DURATION).unwrap();
             let challenger_member = ctx.author_member().await.map(|m| m.into_owned());
             timeout_user(ctx, challenger_member, timeout_end_time).await;
             timeout_user(ctx, interaction.member.clone(), timeout_end_time).await;
@@ -107,7 +105,11 @@ async fn run_duel(
         }
     };
 
-    let final_message = format!("{accepter} has rolled a {accepter_score} and {challenger} has rolled a {challenger_score}. {winner_text}");
+    let final_message = format!(
+        "{} has rolled a {accepter_score} and {} has rolled a {challenger_score}. {winner_text}",
+        accepter.id.mention(),
+        challenger.id.mention()
+    );
     let update_resp = update_response(text_message(final_message).components(Vec::new()));
     interaction.create_response(ctx, update_resp).await?;
 
@@ -124,7 +126,7 @@ async fn find_opponent(
     while let Some(interaction) = ComponentInteractionCollector::new(ctx)
         .message_id(message_id)
         .filter(move |f| f.data.custom_id == "duel-btn")
-        .timeout(DEAD_DUEL_COOLDOWN)
+        .timeout(DEAD_DUEL_COOLDOWN.to_std().unwrap())
         .await
     {
         // NOTE: responding with an ephemeral message does not trigger the
@@ -228,9 +230,11 @@ async fn update_users_win_loss(
             losses = losses + 1,
             loss_streak = loss_streak + 1,
             loss_streak_max = MAX(loss_streak_max, loss_streak + 1),
-            win_streak = 0;"#,
+            win_streak = 0;
+        UPDATE User SET last_loss = datetime('now') WHERE id = ?"#,
         winner_id,
-        loser_id
+        loser_id,
+        loser_id,
     )
     .execute(&mut *executor)
     .await
@@ -354,12 +358,12 @@ impl DuelUser {
             }
         };
 
-        let now = Utc::now().naive_utc();
-
-        let loss_cooldown_duration = chrono::Duration::minutes(LOSS_COOLDOWN);
-        if last_loss + loss_cooldown_duration > now {
-            let time_until_duel = (last_loss + loss_cooldown_duration).and_utc().timestamp();
-            bail!("{self} you have recently lost a duel. Please try again <t:{time_until_duel}:R>.")
+        let time_until_duel = (last_loss + LOSS_COOLDOWN).and_utc();
+        if time_until_duel > Utc::now() {
+            bail!(
+                "{self} you have recently lost a duel. Please try again <t:{}:R>.",
+                time_until_duel.timestamp()
+            )
         }
 
         Ok(())

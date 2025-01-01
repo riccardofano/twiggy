@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 const DEAD_DUEL_COOLDOWN: Duration = Duration::from_secs(5 * 60);
-const LOSS_COOLDOWN: Duration = Duration::from_secs(30);
+const LOSS_COOLDOWN: Duration = Duration::from_secs(60 * 10);
 
 static IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
@@ -491,6 +491,7 @@ async fn update_stats_win_loss(
         INSERT INTO RPGCharacter (user_id, losses, elo_rank, peak_elo, floor_elo)
         VALUES ($3, 1, $4, $4, $4)
         ON CONFLICT(user_id) DO UPDATE SET
+            last_loss = datetime('now'),
             losses = losses + 1,
             elo_rank = $4,
             floor_elo = MIN(floor_elo, $4);"#,
