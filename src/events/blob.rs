@@ -1,23 +1,31 @@
 use std::sync::atomic::{AtomicI64, Ordering};
 
-use serenity::all::UserId;
+use poise::serenity_prelude::{
+    all::{Message, UserId},
+    Context,
+};
 
-const BLOB_ID: UserId = UserId::new(1234); // TODO: proper id
+const BLOB_ID: UserId = UserId::new(104908485266817024);
 const TIMEOUT: i64 = 1000 * 60 * 60 * 10;
 
 static LAST_HELLO: AtomicI64 = AtomicI64::new(0);
 
-pub fn try_saying_hi(user_id: UserId, message_timestamp: i64) -> Option<String> {
+pub async fn say_hi(ctx: &Context, message: &Message) {
+    let user_id = message.author.id;
     if user_id != BLOB_ID {
-        return None;
+        return;
     }
 
     let last_hello = LAST_HELLO.load(Ordering::Acquire);
     let next_hello = last_hello + TIMEOUT;
+    let message_timestamp = message.timestamp.timestamp();
     if message_timestamp <= next_hello {
-        return None;
+        return;
     }
 
     LAST_HELLO.store(message_timestamp, Ordering::Release);
-    Some("Hi Blob!".to_string())
+
+    if let Err(e) = message.reply(ctx, "Hi Blob!").await {
+        eprintln!("Failed to say hi to blob: {e:?}");
+    };
 }
