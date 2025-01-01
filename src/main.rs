@@ -39,6 +39,8 @@ async fn main() {
     // Initialize default commands
     let commands = commands::initialize_commands(&database).await;
     commands::set_system_commands(&commands);
+    // Initialize event data
+    events::initialize_event_data().await;
 
     let options = poise::FrameworkOptions {
         commands,
