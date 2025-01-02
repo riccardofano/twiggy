@@ -1,0 +1,12 @@
+[
+    {
+        "expression": "(?i)\\btuturu\\b",
+        "attachment": "Tuturu.png",
+        "cooldown": 60
+    },
+    {
+        "expression": "(?i)zuzuru",
+        "attachment": "Zuzuru.png",
+        "cooldown": 60
+    }
+]
