@@ -117,21 +117,22 @@ pub fn pick_best_x_dice_rolls(
 }
 
 pub fn uwuify(text: &str) -> String {
-    let re = RegexBuilder::new("([rl]|(n[uiae])|ove)").case_insensitive(true).build().unwrap();
-    let text = re.replace_all(text, |cap: &Captures| {
-        match &cap[0] {
-            "r" | "l" => "w",
-            "R" | "L" => "W",
-            "nu" | "ni" | "na" | "ne"  => "ny",
-            "Nu" | "Ni" | "Na" | "Ne"  => "Ny",
-            "nU" | "nI" | "nA" | "nE"  => "nY",
-            "NU" | "NI" | "NA" | "NE"  => "NY",
-            "ove" => "uv",
-            "OVE" => "UV",
-            "oVE" | "oVe" => "uV",
-            "Ove" | "OVe" => "Uv",
-            _ => panic!("We should never get here"),
-        }
+    let re = RegexBuilder::new("([rl]|(n[uiae])|ove)")
+        .case_insensitive(true)
+        .build()
+        .unwrap();
+    let text = re.replace_all(text, |cap: &Captures| match &cap[0] {
+        "r" | "l" => "w",
+        "R" | "L" => "W",
+        "nu" | "ni" | "na" | "ne" => "ny",
+        "Nu" | "Ni" | "Na" | "Ne" => "Ny",
+        "nU" | "nI" | "nA" | "nE" => "nY",
+        "NU" | "NI" | "NA" | "NE" => "NY",
+        "ove" => "uv",
+        "OVE" => "UV",
+        "oVE" | "oVe" => "uV",
+        "Ove" | "OVe" => "Uv",
+        _ => panic!("We should never get here"),
     });
     text.to_string()
 }
