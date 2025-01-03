@@ -1,5 +1,6 @@
 use crate::Context;
 
+use anyhow::anyhow;
 use poise::serenity_prelude::{
     Colour, CreateActionRow, CreateEmbed, CreateInteractionResponse,
     CreateInteractionResponseMessage, Member, User,
@@ -8,8 +9,10 @@ use poise::CreateReply;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rand_seeder::Seeder;
-use std::borrow::Cow;
 use regex::{Captures, RegexBuilder};
+use serenity::all::UserId;
+use std::borrow::Cow;
+use std::str::FromStr;
 
 pub fn response(message: CreateInteractionResponseMessage) -> CreateInteractionResponse {
     CreateInteractionResponse::Message(message)
@@ -61,6 +64,19 @@ pub async fn name(ctx: &Context<'_>, person: &User) -> String {
         .unwrap_or_else(|| person.name.clone())
 }
 
+pub async fn user_name(ctx: &Context<'_>, user_id: &str) -> anyhow::Result<String> {
+    match UserId::from_str(user_id) {
+        Ok(uid) => {
+            let user = uid.to_user(&ctx).await;
+            match user {
+                Ok(u) => Ok(name(&ctx, &u).await),
+                Err(e) => Err(anyhow!("Unable to find user: {e}")),
+            }
+        }
+        Err(e) => Err(anyhow!("Unable to parse user id: {e}")),
+    }
+}
+
 pub async fn member<'a>(ctx: &'a Context<'_>) -> Option<Cow<'a, Member>> {
     ctx.author_member().await
 }
@@ -101,21 +117,22 @@ pub fn pick_best_x_dice_rolls(
 }
 
 pub fn uwuify(text: &str) -> String {
-    let re = RegexBuilder::new("([rl]|(n[uiae])|ove)").case_insensitive(true).build().unwrap();
-    let text = re.replace_all(text, |cap: &Captures| {
-        match &cap[0] {
-            "r" | "l" => "w",
-            "R" | "L" => "W",
-            "nu" | "ni" | "na" | "ne"  => "ny",
-            "Nu" | "Ni" | "Na" | "Ne"  => "Ny",
-            "nU" | "nI" | "nA" | "nE"  => "nY",
-            "NU" | "NI" | "NA" | "NE"  => "NY",
-            "ove" => "uv",
-            "OVE" => "UV",
-            "oVE" | "oVe" => "uV",
-            "Ove" | "OVe" => "Uv",
-            _ => panic!("We should never get here"),
-        }
+    let re = RegexBuilder::new("([rl]|(n[uiae])|ove)")
+        .case_insensitive(true)
+        .build()
+        .unwrap();
+    let text = re.replace_all(text, |cap: &Captures| match &cap[0] {
+        "r" | "l" => "w",
+        "R" | "L" => "W",
+        "nu" | "ni" | "na" | "ne" => "ny",
+        "Nu" | "Ni" | "Na" | "Ne" => "Ny",
+        "nU" | "nI" | "nA" | "nE" => "nY",
+        "NU" | "NI" | "NA" | "NE" => "NY",
+        "ove" => "uv",
+        "OVE" => "UV",
+        "oVE" | "oVe" => "uV",
+        "Ove" | "OVe" => "Uv",
+        _ => panic!("We should never get here"),
     });
     text.to_string()
 }

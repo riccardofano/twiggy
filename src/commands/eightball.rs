@@ -77,7 +77,7 @@ pub async fn eightball(
 #[poise::command(slash_command, prefix_command)]
 pub async fn fball(
     ctx: Context<'_>,
-    #[description = "majicc 8bol\" n \"d Q u wan2b askerin d 8bol"] message: Option<String>
+    #[description = "majicc 8bol\" n \"d Q u wan2b askerin d 8bol"] message: Option<String>,
 ) -> Result<()> {
     let fortune = {
         let mut rng = rand::thread_rng();
