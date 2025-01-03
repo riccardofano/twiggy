@@ -1,6 +1,6 @@
 use crate::common::{
     avatar_url, bail_reply, colour, ephemeral_text_message, name, reply_with_buttons, response,
-    text_message, update_response,
+    text_message, update_response, user_name,
 };
 use crate::Context;
 
@@ -11,9 +11,10 @@ use poise::serenity_prelude::{
     UserId,
 };
 use poise::{CreateReply, ReplyHandle};
-use rand::Rng;
+use rand::seq::SliceRandom;
+use rand::{thread_rng, Rng};
 use serenity::all::{ComponentInteraction, ComponentInteractionCollector, Mentionable, MessageId};
-use sqlx::{Connection, SqliteExecutor, Transaction};
+use sqlx::{Connection, Row, SqliteExecutor, Transaction};
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
@@ -24,9 +25,14 @@ const TIMEOUT_DURATION: TimeDelta = TimeDelta::minutes(10);
 
 static IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
+#[poise::command(slash_command, subcommands("challenge", "stats", "streaks"))]
+pub async fn duel(_ctx: Context<'_>) -> Result<()> {
+    Ok(())
+}
+
 /// Challenge the chat to a duel
 #[poise::command(slash_command, guild_only)]
-pub async fn duel(ctx: Context<'_>) -> Result<()> {
+pub async fn challenge(ctx: Context<'_>) -> Result<()> {
     let challenger = DuelUser::from(ctx, ctx.author()).await;
 
     if IN_PROGRESS.load(AtomicOrdering::Acquire) {
@@ -161,7 +167,7 @@ async fn find_opponent(
 
 /// Display your duel statistics
 #[poise::command(slash_command)]
-pub async fn duelstats(ctx: Context<'_>) -> Result<()> {
+pub async fn stats(ctx: Context<'_>) -> Result<()> {
     let user = ctx.author();
     let conn = &mut ctx.data().database.acquire().await?;
 
@@ -308,6 +314,89 @@ async fn get_duel_stats(
     .with_context(|| format!("Failed to get {user_id}'s duel stats"))?;
 
     Ok(stats)
+}
+
+#[poise::command(guild_only, slash_command)]
+async fn streaks(ctx: Context<'_>) -> Result<()> {
+    let conn = &mut ctx.data().database.acquire().await?;
+
+    // Query various stats from the DB
+    let stats_value: Vec<(&str, &str)> = vec![
+        ("win_streak", "Highest win streak"),
+        ("loss_streak", "Highest loss streak"),
+        ("draws", "Highest # of draws"),
+        ("wins", "Highest # of wins"),
+        ("losses", "Highest # of losses"),
+    ];
+    let mut embed_fields = vec![];
+
+    // Transform them into and iterator that we can embed
+    for (stat_name, stat_message) in stats_value {
+        // The query concatenates all user_ids if there are multiples,
+        // but does not return anything if there are no users.
+        let query = format!(
+            r#"
+            SELECT
+                {stat_name} AS stat_value,
+                GROUP_CONCAT(user_id) AS user_ids
+            FROM
+                DuelStats
+            WHERE {stat_name}=(
+                SELECT MAX({stat_name}) FROM DuelStats)
+            GROUP BY
+              {stat_name}
+            HAVING
+              {stat_name} > 0"#
+        );
+        let streak_result = sqlx::query(query.as_str());
+        let first_result = streak_result
+            .fetch_one(&mut *conn)
+            .await
+            .with_context(|| format!("Failed to get {stat_name}"));
+
+        match first_result {
+            Ok(stat) => {
+                let mut top_user_names = vec![];
+                for user_id in stat.get::<String, _>("user_ids").split(",") {
+                    let user_name = user_name(&ctx, user_id).await.unwrap_or_else(|_| {
+                        eprintln!("Could not find user with id: {user_id}. Using a default owner name for this stat.");
+                        "unknown user".to_string()
+                    });
+                    top_user_names.push(user_name);
+                }
+                top_user_names.shuffle(&mut thread_rng());
+                embed_fields.push((
+                    stat_message,
+                    format!(
+                        "{value} by {users}",
+                        value = stat.get::<i64, _>("stat_value").to_string().as_str(),
+                        // Join the first three elements
+                        users = top_user_names
+                            .iter()
+                            .take(3)
+                            .cloned()
+                            .collect::<Vec<String>>()
+                            .join(", ")
+                    ),
+                    false,
+                ));
+            }
+            Err(_) => {
+                eprintln!("Unable to query {stat_name}");
+                embed_fields.push((stat_message, "None yet".to_string(), false));
+            }
+        }
+    }
+
+    let colour = colour(&ctx).await.unwrap_or_else(|| 0x9932CC.into());
+    let embed = CreateEmbed::default()
+        .colour(colour)
+        .title("Duel Streaks")
+        .fields(embed_fields);
+
+    ctx.send(CreateReply::default().embed(embed)).await?;
+
+    Ok(())
 }
 
 async fn timeout_user(ctx: Context<'_>, member: Option<Member>, until: DateTime<Utc>) {

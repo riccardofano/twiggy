@@ -1,5 +1,6 @@
 use crate::Context;
 
+use anyhow::anyhow;
 use poise::serenity_prelude::{
     Colour, CreateActionRow, CreateEmbed, CreateInteractionResponse,
     CreateInteractionResponseMessage, Member, User,
@@ -8,8 +9,10 @@ use poise::CreateReply;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rand_seeder::Seeder;
-use std::borrow::Cow;
 use regex::{Captures, RegexBuilder};
+use serenity::all::UserId;
+use std::borrow::Cow;
+use std::str::FromStr;
 
 pub fn response(message: CreateInteractionResponseMessage) -> CreateInteractionResponse {
     CreateInteractionResponse::Message(message)
@@ -59,6 +62,19 @@ pub async fn name(ctx: &Context<'_>, person: &User) -> String {
     nickname(ctx, person)
         .await
         .unwrap_or_else(|| person.name.clone())
+}
+
+pub async fn user_name(ctx: &Context<'_>, user_id: &str) -> anyhow::Result<String> {
+    match UserId::from_str(user_id) {
+        Ok(uid) => {
+            let user = uid.to_user(&ctx).await;
+            match user {
+                Ok(u) => Ok(name(&ctx, &u).await),
+                Err(e) => Err(anyhow!("Unable to find user: {e}")),
+            }
+        }
+        Err(e) => Err(anyhow!("Unable to parse user id: {e}")),
+    }
 }
 
 pub async fn member<'a>(ctx: &'a Context<'_>) -> Option<Cow<'a, Member>> {
