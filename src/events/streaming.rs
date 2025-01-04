@@ -28,13 +28,11 @@ pub async fn update_streaming_role_status(ctx: &Context, new_data: &Presence) ->
         ctx.http
             .add_member_role(guild_id, new_data.user.id, STREAMING_ROLE, None)
             .await
-            .context("Failed to add streaming role")?;
+            .context("Failed to add streaming role")
     } else {
         ctx.http
             .remove_member_role(guild_id, new_data.user.id, STREAMING_ROLE, None)
             .await
-            .context("Failed to remove streaming role")?;
+            .context("Failed to remove streaming role")
     }
-
-    Ok(())
 }
