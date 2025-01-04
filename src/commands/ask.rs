@@ -1,4 +1,4 @@
-use crate::{common::bail_reply, Context, Result};
+use crate::{common::bail_reply, config::ASK_COOLDOWN, Context, Result};
 
 use std::sync::{
     atomic::{AtomicI64, Ordering},
@@ -19,9 +19,6 @@ pub enum Unit {
     Metric,
 }
 
-// This looks dumb but it tells me that I'm using seconds
-// instead of just being a random number
-const ASK_COOLDOWN: i64 = std::time::Duration::from_secs(10).as_secs() as i64;
 static WOLFRAM_APP_ID: OnceLock<String> = OnceLock::new();
 
 pub fn initialize_app_id() -> Result<()> {
@@ -30,6 +27,9 @@ pub fn initialize_app_id() -> Result<()> {
 
     Ok(())
 }
+
+// TODO: Use global_cooldowns attribute instead of checking cooldown manually maybe
+// TODO: Set the cooldown after you responded to the user so if it fails they can try again immediately
 
 /// Ask a question to Wolfram Alpha
 #[poise::command(slash_command, prefix_command, custom_data = "AtomicI64::new(0)")]
@@ -81,7 +81,7 @@ async fn update_cooldown(ctx: Context<'_>) -> Result<()> {
         .expect("Expected the command to have the last use timestamp");
 
     let now = Utc::now().timestamp();
-    let cooldown_end = last_called.load(Ordering::Relaxed) + ASK_COOLDOWN;
+    let cooldown_end = last_called.load(Ordering::Relaxed) + ASK_COOLDOWN.num_seconds();
     if cooldown_end > now {
         bail!("The command will be off cooldown <t:{cooldown_end}:R>");
     }

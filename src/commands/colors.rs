@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::time::Duration;
 
 use anyhow::{bail, Context as Ctx};
 use chrono::{NaiveDateTime, Utc};
@@ -10,16 +9,9 @@ use tokio::sync::Mutex;
 
 use crate::{
     common::{bail_reply, ephemeral_reply},
-    Context, Result, SUB_ROLE_ID,
+    config::{COLOR_ANCHOR_ROLE, DEFAULT_GAMBLE_FAIL_CHANCE, RANDOM_COLOR_COOLDOWN, SUB_ROLE},
+    Context, Result,
 };
-
-// These commands were originally made in american english so I'm keeping them
-// that way, there won't be any `ou`s in this module.
-
-const DEFAULT_GAMBLE_FAIL_CHANCE: u8 = 15;
-const RANDOM_COLOR_COOLDOWN: Duration = Duration::from_secs(60 * 60);
-
-const ANCHOR_ROLE_ID: u64 = SUB_ROLE_ID;
 
 #[poise::command(
     guild_only,
@@ -160,7 +152,7 @@ async fn change_color(
     let role = match guild.role_by_name(&role_name) {
         Some(role) => role.clone(),
         None => {
-            let Some(anchor_role) = guild.roles.get(&ANCHOR_ROLE_ID.into()) else {
+            let Some(anchor_role) = guild.roles.get(&COLOR_ANCHOR_ROLE) else {
                 bail!(
                     "The anchor role was not found, \
                 unable to create a role with at the correct position."
@@ -413,7 +405,7 @@ async fn reject_on_cooldown(ctx: Context<'_>) -> Result<()> {
     .context("Something went wrong while trying to fetch your cooldowns")?;
 
     let now = Utc::now().naive_utc();
-    let cooldown_duration = chrono::Duration::from_std(RANDOM_COLOR_COOLDOWN)?;
+    let cooldown_duration = RANDOM_COLOR_COOLDOWN;
 
     let permitted_time_from_random = row.last_random + cooldown_duration;
     let permitted_time_from_loss = row.last_loss + cooldown_duration;
@@ -436,7 +428,7 @@ async fn reject_on_cooldown(ctx: Context<'_>) -> Result<()> {
 }
 
 async fn reject_non_subs(member: &Member) -> Result<()> {
-    if !member.roles.contains(&SUB_ROLE_ID.into()) {
+    if !member.roles.contains(&SUB_ROLE) {
         bail!("Yay! You get to keep your white color!");
     }
 

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::common::{bail_reply, ephemeral_reply};
 use crate::{Context, Result};
 

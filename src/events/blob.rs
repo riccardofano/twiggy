@@ -1,12 +1,8 @@
 use std::sync::atomic::{AtomicI64, Ordering};
 
-use poise::serenity_prelude::{
-    all::{Message, UserId},
-    Context,
-};
+use poise::serenity_prelude::{all::Message, Context};
 
-const BLOB_ID: UserId = UserId::new(104908485266817024);
-const TIMEOUT: i64 = 1000 * 60 * 60 * 10;
+use crate::config::{BLOB_HI_TIMEOUT, BLOB_ID};
 
 static LAST_HELLO: AtomicI64 = AtomicI64::new(0);
 
@@ -17,7 +13,7 @@ pub async fn say_hi(ctx: &Context, message: &Message) {
     }
 
     let last_hello = LAST_HELLO.load(Ordering::Acquire);
-    let next_hello = last_hello + TIMEOUT;
+    let next_hello = last_hello + BLOB_HI_TIMEOUT.num_milliseconds();
     let message_timestamp = message.timestamp.timestamp();
     if message_timestamp <= next_hello {
         return;

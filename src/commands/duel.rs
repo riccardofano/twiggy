@@ -2,10 +2,11 @@ use crate::common::{
     avatar_url, bail_reply, colour, ephemeral_text_message, name, reply_with_buttons, response,
     text_message, update_response, user_name,
 };
+use crate::config::{DEAD_DUEL_COOLDOWN, DRAW_TIMEOUT_DURATION, DUEL_LOSS_COOLDOWN};
 use crate::Context;
 
 use anyhow::{bail, Context as AnyhowContext, Result};
-use chrono::{DateTime, NaiveDateTime, TimeDelta, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use poise::serenity_prelude::{
     ButtonStyle, CreateActionRow, CreateButton, CreateEmbed, CreateEmbedAuthor, Member, User,
     UserId,
@@ -18,10 +19,6 @@ use sqlx::{Connection, Error, SqliteExecutor, Transaction};
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
-
-const LOSS_COOLDOWN: TimeDelta = TimeDelta::minutes(10);
-const DEAD_DUEL_COOLDOWN: TimeDelta = TimeDelta::minutes(5);
-const TIMEOUT_DURATION: TimeDelta = TimeDelta::minutes(10);
 
 static IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
@@ -101,7 +98,9 @@ async fn run_duel(
             update_users_drawn(&mut transaction, &challenger.string_id, &accepter.string_id)
                 .await?;
 
-            let timeout_end_time = Utc::now().checked_add_signed(TIMEOUT_DURATION).unwrap();
+            let timeout_end_time = Utc::now()
+                .checked_add_signed(DRAW_TIMEOUT_DURATION)
+                .unwrap();
             let challenger_member = ctx.author_member().await.map(|m| m.into_owned());
             timeout_user(ctx, challenger_member, timeout_end_time).await;
             timeout_user(ctx, interaction.member.clone(), timeout_end_time).await;
@@ -450,7 +449,7 @@ impl DuelUser {
             }
         };
 
-        let time_until_duel = (last_loss + LOSS_COOLDOWN).and_utc();
+        let time_until_duel = (last_loss + DUEL_LOSS_COOLDOWN).and_utc();
         if time_until_duel > Utc::now() {
             bail!(
                 "{self} you have recently lost a duel. Please try again <t:{}:R>.",

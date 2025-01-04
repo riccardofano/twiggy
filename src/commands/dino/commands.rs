@@ -18,10 +18,13 @@ use std::str::FromStr;
 use std::sync::OnceLock;
 
 use crate::common::{bail_reply, embed_message, ephemeral_text_message, response};
+use crate::config::{DINO_GIFTING_COOLDOWN, DINO_SLURP_COOLDOWN};
 use crate::{
     common::{avatar_url, ephemeral_reply, name as get_name, pick_best_x_dice_rolls},
     Context, Result, SUB_ROLE_ID,
 };
+
+// TODO: Use DateTime<Utc> instead of NaiveDateTime for database times
 
 #[derive(Debug, Default)]
 struct Fragments {
@@ -51,9 +54,6 @@ const MAX_GENERATION_ATTEMPTS: usize = 20;
 const MAX_FAILED_HATCHES: i64 = 3;
 const HATCH_FAILS_TEXT: &[&str; 3] = &["1st", "2nd", "3rd"];
 const MAX_DINO_WORTH_EXPONENT: f64 = 30.0;
-
-// const GIFTING_COOLDOWN: Duration = Duration::from_secs(60 * 60);
-// const SLURP_COOLDOWN: Duration = Duration::from_secs(60 * 60);
 
 pub const COVET_BUTTON: &str = "dino-covet";
 pub const SHUN_BUTTON: &str = "dino-shun";
@@ -127,7 +127,7 @@ impl Timings {
 
     fn slurp(user_record: &UserRecord) -> Self {
         let attempt = Utc::now().naive_utc();
-        let slurp_cooldown_duration = chrono::Duration::minutes(60);
+        let slurp_cooldown_duration = DINO_SLURP_COOLDOWN;
         let time_until_next_slurp = user_record.last_slurp + slurp_cooldown_duration;
 
         Timings {
@@ -140,7 +140,7 @@ impl Timings {
 
     fn gift(user_record: &UserRecord) -> Self {
         let attempt = Utc::now().naive_utc();
-        let gifting_cooldown_duration = chrono::Duration::minutes(60);
+        let gifting_cooldown_duration = DINO_GIFTING_COOLDOWN;
         let time_until_next_gift = user_record.last_gifting + gifting_cooldown_duration;
 
         Timings {

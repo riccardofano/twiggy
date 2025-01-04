@@ -1,5 +1,6 @@
 mod commands;
 mod common;
+pub mod config;
 mod events;
 
 use std::num::NonZeroUsize;

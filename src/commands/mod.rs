@@ -62,7 +62,7 @@ pub async fn initialize_commands(database: &sqlx::SqlitePool) -> Vec<Command<Dat
         eightball::fball(),
         embedpls::embedpls(),
         mixu::mikustare(),
-        poll::poll(),
+        // poll::poll(), // omit this for now
         quote::quote(),
         quote::quwuote(),
         rockpaperscissors::rps(),

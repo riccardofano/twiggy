@@ -28,7 +28,8 @@ pub type SimpleCommands = HashMap<i64, HashMap<String, CommandInfo>>;
     slash_command,
     prefix_command,
     subcommands("add", "edit", "remove"),
-    required_permissions = "MODERATE_MEMBERS"
+    required_permissions = "MODERATE_MEMBERS",
+    default_member_permissions = "MODERATE_MEMBERS"
 )]
 pub async fn commands(_ctx: Context<'_>) -> Result<()> {
     Ok(())
