@@ -7,7 +7,7 @@ use std::num::NonZeroUsize;
 use anyhow::Result;
 use common::bail_reply;
 use lru::LruCache;
-use poise::serenity_prelude::{self as serenity, FullEvent};
+use poise::serenity_prelude::{self as serenity, FullEvent, GatewayIntents};
 use tokio::sync::{Mutex, RwLock};
 
 pub struct Data {
@@ -23,8 +23,9 @@ pub const SUB_ROLE_ID: u64 = 930791790490030100;
 #[tokio::main]
 async fn main() {
     let token = std::env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN");
-    let intents =
-        serenity::GatewayIntents::non_privileged() | serenity::GatewayIntents::MESSAGE_CONTENT;
+    let intents = GatewayIntents::non_privileged()
+        | GatewayIntents::MESSAGE_CONTENT
+        | GatewayIntents::GUILD_PRESENCES;
 
     let database = sqlx::sqlite::SqlitePoolOptions::new()
         .max_connections(5)
@@ -116,6 +117,7 @@ async fn event_event_handler<'a>(
             commands::setup_collectors(ctx, user_data).await;
         }
         FullEvent::Message { new_message } => events::handle_new_message_event(ctx, new_message),
+        FullEvent::PresenceUpdate { new_data } => events::handle_presence_update(ctx, new_data),
         FullEvent::InteractionCreate { interaction } => {
             commands::try_intercepting_command_call(ctx, user_data, interaction).await?;
         }
