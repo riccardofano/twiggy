@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicI64, Ordering};
 
-use crate::{Context, Result};
+use crate::{common::bail_reply, config::MIXU_CHANNEL, Context, Result};
 
 use poise::serenity_prelude::{Emoji, Mention, UserId};
 use rand::{seq::SliceRandom, thread_rng};
@@ -31,6 +31,11 @@ pub async fn set_initial_best_mixu_score(db: &SqlitePool) -> Result<()> {
 /// Generate a random mixu
 #[poise::command(guild_only, slash_command, prefix_command)]
 pub async fn mixu(ctx: Context<'_>) -> Result<()> {
+    if ctx.channel_id() != MIXU_CHANNEL {
+        let msg = format!("You can only use this command in {}", MIXU_CHANNEL);
+        return bail_reply(ctx, msg).await;
+    }
+
     let mut positions = MIKU_POSITIONS;
     positions.shuffle(&mut thread_rng());
 

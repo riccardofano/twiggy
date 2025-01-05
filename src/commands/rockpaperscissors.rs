@@ -1,10 +1,11 @@
-use std::{str::FromStr, time::Duration};
+use std::str::FromStr;
 
 use crate::{
     common::{
         ephemeral_text_message, message_with_buttons, reply_with_buttons, response,
         update_response, Score,
     },
+    config::{RPS_ACCEPT_TIMEOUT, RPS_CHOICE_TIMEOUT},
     Context,
 };
 use anyhow::{bail, Result};
@@ -57,9 +58,6 @@ const ACCEPT_BTN: &str = "rps-accept";
 const ROCK_BTN: &str = "rps-rock";
 const PAPER_BTN: &str = "rps-paper";
 const SCISSORS_BTN: &str = "rps-scissors";
-
-const ACCEPT_TIMEOUT: Duration = Duration::from_secs(600);
-const CHOICE_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Challenge someone to a rock paper scissors battle
 #[poise::command(slash_command)]
@@ -131,7 +129,7 @@ async fn find_opponent(
     challenger_id: u64,
 ) -> Option<ComponentInteraction> {
     while let Some(interaction) = ComponentInteractionCollector::new(ctx)
-        .timeout(ACCEPT_TIMEOUT)
+        .timeout(RPS_ACCEPT_TIMEOUT.to_std().unwrap())
         .message_id(message_id)
         .filter(move |f| f.data.custom_id == ACCEPT_BTN)
         .await
@@ -155,7 +153,7 @@ async fn get_user_weapon_choice(
 ) -> Result<Option<Weapon>> {
     let weapon_button_interaction = ComponentInteractionCollector::new(ctx)
         .message_id(message_id)
-        .timeout(CHOICE_TIMEOUT)
+        .timeout(RPS_CHOICE_TIMEOUT.to_std().unwrap())
         .filter(move |f| {
             f.user.id.get() == author_id
                 && [ROCK_BTN, PAPER_BTN, SCISSORS_BTN].contains(&f.data.custom_id.as_str())

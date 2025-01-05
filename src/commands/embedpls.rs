@@ -1,8 +1,6 @@
-use serenity::all::{Member, RoleId};
+use serenity::all::Member;
 
-use crate::{common::bail_reply, Context, Result};
-
-const EMBED_ROLE: RoleId = RoleId::new(930791790490030100);
+use crate::{common::bail_reply, config::EMBED_ROLE, Context, Result};
 
 /// Toggle the ability of embedding images/videos
 #[poise::command(guild_only, slash_command, prefix_command)]

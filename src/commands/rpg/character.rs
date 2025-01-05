@@ -10,10 +10,9 @@ use serenity::all::User;
 
 use crate::commands::rpg::data::{CLASSES, STANDARD_SPECIES};
 use crate::common::pick_best_x_dice_rolls;
+use crate::config::BANANA_ID;
 
 use super::data::{Class, Specie, Stat, ADJECTIVES, BANANA_SPECIE, NOUNS};
-
-const BANANA_ID: u64 = 1234567;
 
 const HIT_DICE_SIDES: usize = 6;
 const HIT_DICE_POOL: usize = 10;
@@ -62,7 +61,7 @@ impl Character {
         let class = CLASSES
             .choose(&mut rng)
             .expect("Expected the class array to not be empty");
-        let specie = if user_id == BANANA_ID {
+        let specie = if user_id == BANANA_ID.get() {
             BANANA_SPECIE
         } else {
             STANDARD_SPECIES

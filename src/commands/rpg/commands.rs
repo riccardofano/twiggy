@@ -7,6 +7,7 @@ use crate::common::{
     avatar_url, bail_reply, ephemeral_text_message, name, nickname, reply_with_buttons, response,
     text_message, update_response, Score,
 };
+use crate::config::{RPG_DEAD_DUEL_COOLDOWN, RPG_LOSS_COOLDOWN};
 use crate::Context;
 
 use anyhow::{bail, Context as DiscordContext, Result};
@@ -20,10 +21,6 @@ use serenity::all::{ComponentInteraction, ComponentInteractionCollector, Message
 use sqlx::{Connection, SqliteConnection};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
-
-const DEAD_DUEL_COOLDOWN: Duration = Duration::from_secs(5 * 60);
-const LOSS_COOLDOWN: Duration = Duration::from_secs(60 * 10);
 
 static IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
@@ -141,7 +138,7 @@ async fn find_opponent(
     while let Some(interaction) = ComponentInteractionCollector::new(ctx)
         .message_id(message_id)
         .filter(move |f| f.data.custom_id == "rpg-btn")
-        .timeout(DEAD_DUEL_COOLDOWN)
+        .timeout(RPG_DEAD_DUEL_COOLDOWN.to_std().unwrap())
         .await
     {
         if interaction.user.id == challenger_id {
@@ -174,7 +171,7 @@ async fn find_opponent(
 
 fn assert_no_recent_loss(stats: &CharacterPastStats) -> Result<()> {
     let now = Utc::now().naive_utc();
-    let loss_cooldown_duration = chrono::Duration::from_std(LOSS_COOLDOWN)?;
+    let loss_cooldown_duration = RPG_LOSS_COOLDOWN;
 
     if stats.last_loss + loss_cooldown_duration > now {
         let time_until_duel = (stats.last_loss + loss_cooldown_duration)
