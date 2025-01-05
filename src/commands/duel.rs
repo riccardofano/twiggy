@@ -14,7 +14,7 @@ use poise::{CreateReply, ReplyHandle};
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use serenity::all::{ComponentInteraction, ComponentInteractionCollector, Mentionable, MessageId};
-use sqlx::{Connection, Row, SqliteExecutor, Transaction};
+use sqlx::{Connection, Error, SqliteExecutor, Transaction};
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
@@ -316,12 +316,26 @@ async fn get_duel_stats(
     Ok(stats)
 }
 
+#[derive(sqlx::FromRow, Debug, PartialEq, Eq)]
+struct StreakStat {
+    value: i64,
+    user_ids: String,
+}
+
+impl StreakStat {
+    pub fn first_n_random_user_ids(&self, n: usize) -> Vec<String> {
+        let mut user_ids: Vec<&str> = self.user_ids.split(",").collect();
+        user_ids.shuffle(&mut thread_rng());
+        user_ids.iter().take(n).map(|&u| u.to_string()).collect()
+    }
+}
+
 #[poise::command(guild_only, slash_command)]
 async fn streaks(ctx: Context<'_>) -> Result<()> {
     let conn = &mut ctx.data().database.acquire().await?;
 
     // Query various stats from the DB
-    let stats_value: Vec<(&str, &str)> = vec![
+    const STATS_VALUES: [(&str, &str); 5] = [
         ("win_streak", "Highest win streak"),
         ("loss_streak", "Highest loss streak"),
         ("draws", "Highest # of draws"),
@@ -331,13 +345,13 @@ async fn streaks(ctx: Context<'_>) -> Result<()> {
     let mut embed_fields = vec![];
 
     // Transform them into and iterator that we can embed
-    for (stat_name, stat_message) in stats_value {
+    for (stat_name, stat_message) in STATS_VALUES {
         // The query concatenates all user_ids if there are multiples,
         // but does not return anything if there are no users.
         let query = format!(
             r#"
             SELECT
-                {stat_name} AS stat_value,
+                {stat_name} AS value,
                 GROUP_CONCAT(user_id) AS user_ids
             FROM
                 DuelStats
@@ -348,49 +362,38 @@ async fn streaks(ctx: Context<'_>) -> Result<()> {
             HAVING
               {stat_name} > 0"#
         );
-        let streak_result = sqlx::query(query.as_str());
-        let first_result = streak_result
-            .fetch_one(&mut *conn)
-            .await
-            .with_context(|| format!("Failed to get {stat_name}"));
+        let streak_result: Result<StreakStat, Error> =
+            sqlx::query_as(&query).fetch_one(&mut *conn).await;
 
-        match first_result {
+        match streak_result {
             Ok(stat) => {
                 let mut top_user_names = vec![];
-                for user_id in stat.get::<String, _>("user_ids").split(",") {
-                    let user_name = user_name(&ctx, user_id).await.unwrap_or_else(|_| {
+                for user_id in stat.first_n_random_user_ids(3) {
+                    let user_name = user_name(&ctx, &user_id).await.unwrap_or_else(|_| {
                         eprintln!("Could not find user with id: {user_id}. Using a default owner name for this stat.");
                         "unknown user".to_string()
                     });
                     top_user_names.push(user_name);
                 }
-                top_user_names.shuffle(&mut thread_rng());
                 embed_fields.push((
                     stat_message,
                     format!(
                         "{value} by {users}",
-                        value = stat.get::<i64, _>("stat_value").to_string().as_str(),
-                        // Join the first three elements
-                        users = top_user_names
-                            .iter()
-                            .take(3)
-                            .cloned()
-                            .collect::<Vec<String>>()
-                            .join(", ")
+                        value = stat.value,
+                        users = top_user_names.join(", ")
                     ),
                     false,
                 ));
             }
-            Err(_) => {
-                eprintln!("Unable to query {stat_name}");
+            Err(e) => {
+                eprintln!("Unable to query {stat_name}: {e}");
                 embed_fields.push((stat_message, "None yet".to_string(), false));
             }
         }
     }
 
-    let colour = colour(&ctx).await.unwrap_or_else(|| 0x9932CC.into());
     let embed = CreateEmbed::default()
-        .colour(colour)
+        .colour(0x9932CC)
         .title("Duel Streaks")
         .fields(embed_fields);
 
