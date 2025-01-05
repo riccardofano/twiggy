@@ -1,14 +1,13 @@
-use anyhow::Context as AnyhowContext;
+use anyhow::Context as _;
 use poise::serenity_prelude::{
-    all::{ActivityType, Presence, RoleId},
+    all::{ActivityType, Presence},
     Context,
 };
-use serenity::all::GuildId;
 
-use crate::Result;
-
-const GUILD_ID: GuildId = GuildId::new(111135289648349184);
-const STREAMING_ROLE: RoleId = RoleId::new(1324485822745022486);
+use crate::{
+    config::{GUILD_ID, STREAMING_ROLE},
+    Result,
+};
 
 pub async fn update_streaming_role_status(ctx: &Context, new_data: &Presence) -> Result<()> {
     let Some(guild_id) = new_data.guild_id else {

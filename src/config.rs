@@ -1,8 +1,10 @@
 use chrono::TimeDelta;
-use serenity::all::{ChannelId, RoleId, UserId};
+use serenity::all::{ChannelId, GuildId, RoleId, UserId};
+
+pub const GUILD_ID: GuildId = GuildId::new(111135289648349184);
 
 // ===================
-//    Special users
+//       Users
 // ===================
 
 // Special users IDs
@@ -11,12 +13,13 @@ pub const GOZ_ID: UserId = UserId::new(1234567);
 pub const BLOB_ID: UserId = UserId::new(104908485266817024);
 
 // ===================
-//    Special roles
+//        Roles
 // ===================
 
 pub const SUB_ROLE: RoleId = RoleId::new(930791790490030100);
 pub const COLOR_ANCHOR_ROLE: RoleId = SUB_ROLE;
 pub const EMBED_ROLE: RoleId = RoleId::new(1325149128044445797);
+pub const STREAMING_ROLE: RoleId = RoleId::new(1324485822745022486);
 
 // ===================
 //       Channels
