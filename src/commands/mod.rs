@@ -57,7 +57,6 @@ pub async fn initialize_commands(database: &sqlx::SqlitePool) -> Vec<Command<Dat
         colors::color(),
         colors::uncolor(),
         duel::duel(),
-        duel::duelstats(),
         dynamic_commands::commands(),
         eightball::eightball(),
         eightball::fball(),
