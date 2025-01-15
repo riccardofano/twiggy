@@ -34,10 +34,10 @@ struct Fragments {
 }
 
 #[derive(Debug)]
-struct DinoParts {
-    body: PathBuf,
-    mouth: PathBuf,
-    eyes: PathBuf,
+struct DinoParts<'a> {
+    body: &'a Path,
+    mouth: &'a Path,
+    eyes: &'a Path,
     name: String,
 }
 
@@ -69,7 +69,6 @@ pub fn setup_dinos() -> Result<()> {
         let Ok(entry) = entry else {
             continue;
         };
-
         if !entry.metadata().expect("Could not read metadata").is_file() {
             continue;
         }
@@ -354,7 +353,14 @@ async fn view(
             )
         }
     };
-    let image_path = Path::new(OUTPUT_PATH).join(&dino.filename);
+
+    let image_path = match get_dino_image_path(&dino) {
+        Ok(image_path) => image_path,
+        Err(e) => {
+            eprintln!("Failed to get or generate dino path: {e:?}");
+            return bail_reply(ctx, "I was unable to generate dino image :(").await;
+        }
+    };
 
     send_dino_embed(
         ctx,
@@ -798,7 +804,9 @@ async fn update_last_user_action(
     Ok(())
 }
 
-async fn generate_dino(executor: impl SqliteExecutor<'_> + Copy) -> Result<Option<DinoParts>> {
+async fn generate_dino<'a>(
+    executor: impl SqliteExecutor<'_> + Copy,
+) -> Result<Option<DinoParts<'a>>> {
     let mut tries = 0;
 
     let fragments = DINO_FRAGMENTS.get().unwrap();
@@ -827,10 +835,13 @@ async fn generate_dino(executor: impl SqliteExecutor<'_> + Copy) -> Result<Optio
     }
 }
 
-async fn are_parts_duplicate(executor: impl SqliteExecutor<'_>, parts: &DinoParts) -> Result<bool> {
-    let body = get_file_name(&parts.body);
-    let mouth = get_file_name(&parts.mouth);
-    let eyes = get_file_name(&parts.eyes);
+async fn are_parts_duplicate<'a>(
+    executor: impl SqliteExecutor<'_>,
+    parts: &DinoParts<'a>,
+) -> Result<bool> {
+    let body = get_file_name(parts.body);
+    let mouth = get_file_name(parts.mouth);
+    let eyes = get_file_name(parts.eyes);
     let row = sqlx::query!(
         "SELECT id FROM Dino WHERE body = ? AND mouth = ? AND eyes = ?",
         body,
@@ -843,7 +854,10 @@ async fn are_parts_duplicate(executor: impl SqliteExecutor<'_>, parts: &DinoPart
     Ok(row.is_some())
 }
 
-async fn is_name_duplicate(executor: impl SqliteExecutor<'_>, parts: &DinoParts) -> Result<bool> {
+async fn is_name_duplicate(
+    executor: impl SqliteExecutor<'_>,
+    parts: &DinoParts<'_>,
+) -> Result<bool> {
     let row = sqlx::query!("SELECT id FROM Dino WHERE name = ?", parts.name)
         .fetch_optional(executor)
         .await?;
@@ -851,23 +865,20 @@ async fn is_name_duplicate(executor: impl SqliteExecutor<'_>, parts: &DinoParts)
     Ok(row.is_some())
 }
 
-fn choose_parts(fragments: &Fragments) -> DinoParts {
+fn choose_parts(fragments: &Fragments) -> DinoParts<'_> {
     let mut rng = thread_rng();
     let body = fragments
         .bodies
         .choose(&mut rng)
-        .expect("Expected to have at least one body")
-        .to_path_buf();
+        .expect("Expected to have at least one body");
     let mouth = fragments
         .mouths
         .choose(&mut rng)
-        .expect("Expected to have at least one mouth")
-        .to_path_buf();
+        .expect("Expected to have at least one mouth");
     let eyes = fragments
         .eyes
         .choose(&mut rng)
-        .expect("Expected to have at least one set of eyes")
-        .to_path_buf();
+        .expect("Expected to have at least one set of eyes");
 
     let mut parts = DinoParts {
         body,
@@ -889,9 +900,9 @@ fn get_file_stem(path: &Path) -> &str {
 }
 
 fn generate_dino_name(parts: &DinoParts) -> String {
-    let body = get_file_stem(&parts.body).replace("_b", "");
-    let mouth = get_file_stem(&parts.mouth).replace("_m", "");
-    let eyes = get_file_stem(&parts.eyes).replace("_e", "");
+    let body = get_file_stem(parts.body).replace("_b", "");
+    let mouth = get_file_stem(parts.mouth).replace("_m", "");
+    let eyes = get_file_stem(parts.eyes).replace("_e", "");
 
     let body_end = 3.min(body.len());
     let mouth_start = 3.min(mouth.len() - 3);
@@ -906,9 +917,9 @@ fn generate_dino_name(parts: &DinoParts) -> String {
 }
 
 fn generate_dino_image(parts: &DinoParts) -> Result<PathBuf> {
-    let mut body = Reader::open(&parts.body)?.decode()?;
-    let mouth = Reader::open(&parts.mouth)?.decode()?;
-    let eyes = Reader::open(&parts.eyes)?.decode()?;
+    let mut body = Reader::open(parts.body)?.decode()?;
+    let mouth = Reader::open(parts.mouth)?.decode()?;
+    let eyes = Reader::open(parts.eyes)?.decode()?;
 
     overlay(&mut body, &mouth, 0, 0);
     overlay(&mut body, &eyes, 0, 0);
@@ -920,6 +931,23 @@ fn generate_dino_image(parts: &DinoParts) -> Result<PathBuf> {
     Ok(path)
 }
 
+fn get_dino_image_path(dino: &DinoRecord) -> Result<PathBuf> {
+    let path = Path::new(OUTPUT_PATH).join(&dino.filename);
+
+    if !path.exists() {
+        let parts = DinoParts {
+            body: &Path::new(FRAGMENT_PATH).join(&dino.body),
+            mouth: &Path::new(FRAGMENT_PATH).join(&dino.mouth),
+            eyes: &Path::new(FRAGMENT_PATH).join(&dino.eyes),
+            name: dino.name.clone(),
+        };
+
+        return generate_dino_image(&parts);
+    }
+
+    Ok(path)
+}
+
 fn generate_dino_collection_image(collection: &[DinoRecord]) -> Result<Vec<u8>> {
     let columns = (collection.len() as f32).sqrt().ceil() as u32;
     let rows = (collection.len() as f32 / columns as f32).ceil() as u32;
@@ -927,25 +955,12 @@ fn generate_dino_collection_image(collection: &[DinoRecord]) -> Result<Vec<u8>> 
     let width: u32 = columns * DINO_IMAGE_SIZE + (columns - 1) * COLUMN_MARGIN;
     let height: u32 = rows * DINO_IMAGE_SIZE + (rows - 1) * ROW_MARGIN;
 
-    let output_path = Path::new(OUTPUT_PATH);
-
     let mut image: RgbaImage = ImageBuffer::new(width, height);
     for (i, dino) in collection.iter().enumerate() {
         let x = (i as u32 % columns) * (COLUMN_MARGIN + DINO_IMAGE_SIZE);
         let y = (i as f32 / columns as f32).floor() as u32 * (ROW_MARGIN + DINO_IMAGE_SIZE);
 
-        let dino_image_path = output_path.join(&dino.filename);
-
-        if !dino_image_path.exists() {
-            let fragment_path = Path::new(FRAGMENT_PATH);
-            generate_dino_image(&DinoParts {
-                body: fragment_path.join(&dino.body),
-                mouth: fragment_path.join(&dino.mouth),
-                eyes: fragment_path.join(&dino.eyes),
-                name: dino.name.clone(),
-            })?;
-        }
-
+        let dino_image_path = get_dino_image_path(dino)?;
         let dino_image = Reader::open(&dino_image_path)?.decode()?;
         overlay(&mut image, &dino_image, x.into(), y.into());
     }
@@ -978,16 +993,16 @@ async fn get_user_record(executor: impl SqliteExecutor<'_>, user_id: &str) -> Re
     Ok(row)
 }
 
-async fn insert_dino(
+async fn insert_dino<'a>(
     executor: impl SqliteExecutor<'_>,
     user_id: &str,
-    parts: &DinoParts,
+    parts: &DinoParts<'a>,
     file_path: &Path,
     message_link: Option<&str>,
 ) -> Result<DinoRecord> {
-    let body = get_file_name(&parts.body);
-    let mouth = get_file_name(&parts.mouth);
-    let eyes = get_file_name(&parts.eyes);
+    let body = get_file_name(parts.body);
+    let mouth = get_file_name(parts.mouth);
+    let eyes = get_file_name(parts.eyes);
     let file_name = get_file_name(file_path);
     let message_link = message_link.unwrap_or_default();
 
