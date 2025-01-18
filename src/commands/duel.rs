@@ -323,7 +323,7 @@ struct StreakStat {
 
 impl StreakStat {
     pub fn first_n_random_user_ids(&self, n: usize) -> Vec<String> {
-        let mut user_ids: Vec<&str> = self.user_ids.split(",").collect();
+        let mut user_ids: Vec<&str> = self.user_ids.split(',').collect();
         user_ids.shuffle(&mut thread_rng());
         user_ids.iter().take(n).map(|&u| u.to_string()).collect()
     }
