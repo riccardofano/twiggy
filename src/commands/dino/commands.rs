@@ -42,7 +42,7 @@ struct DinoParts<'a> {
 }
 
 const FRAGMENT_PATH: &str = "./assets/dino/fragments";
-const OUTPUT_PATH: &str = "./assets/dino/complete";
+pub const OUTPUT_PATH: &str = "./assets/dino/complete";
 
 static DINO_FRAGMENTS: OnceLock<Fragments> = OnceLock::new();
 
@@ -931,7 +931,7 @@ fn generate_dino_image(parts: &DinoParts) -> Result<PathBuf> {
     Ok(path)
 }
 
-fn get_dino_image_path(dino: &DinoRecord) -> Result<PathBuf> {
+pub fn get_dino_image_path(dino: &DinoRecord) -> Result<PathBuf> {
     let path = Path::new(OUTPUT_PATH).join(&dino.filename);
 
     if !path.exists() {
@@ -1048,7 +1048,7 @@ async fn update_hatch_message(
 }
 
 #[derive(FromRow)]
-struct DinoRecord {
+pub struct DinoRecord {
     id: i64,
     owner_id: String,
     name: String,
@@ -1165,7 +1165,7 @@ async fn fetch_collection(
     })
 }
 
-async fn get_dino_record(
+pub async fn get_dino_record(
     executor: impl SqliteExecutor<'_>,
     dino_name: &str,
 ) -> Result<Option<DinoRecord>> {

@@ -1,5 +1,7 @@
 use std::fmt::Display;
+use std::path::Path;
 
+use ::serenity::all::CreateAttachment;
 use anyhow::bail;
 use poise::futures_util::StreamExt;
 use poise::serenity_prelude::{
@@ -13,7 +15,7 @@ use crate::common::{embed_message, ephemeral_text_message, response, update_resp
 use crate::Data;
 use crate::Result;
 
-use super::{quirkify_hotness, quirkify_worth};
+use super::{get_dino_image_path, get_dino_record, quirkify_hotness, quirkify_worth, OUTPUT_PATH};
 
 enum TransactionType {
     Covet,
@@ -83,7 +85,7 @@ async fn handle_dino_collector(
     let mut transaction = user_data.database.begin().await?;
     let dino = fetch_dino_names(&mut transaction, dino_id).await?;
 
-    let Some((dino_name, _dino_image_name)) = dino else {
+    let Some((dino_name, dino_image_name)) = dino else {
         let old_embed = interaction.message.embeds[0].clone();
 
         let dino_name = &old_embed.title.as_deref().unwrap_or("Unknown dino");
@@ -112,8 +114,8 @@ async fn handle_dino_collector(
     } else {
         let (gifts, hotness) = calculate_dino_score(&mut transaction, dino_id).await?;
 
-        // NOTE NOTE: You don't need to update the attachment anymore.
         let old_embed = interaction.message.embeds[0].clone();
+        let old_image = old_embed.image.clone();
         let new_embed =
             CreateEmbed::from(old_embed)
                 .title(&dino_name)
@@ -122,6 +124,42 @@ async fn handle_dino_collector(
                     quirkify_worth(gifts + 1), // +1 because the hatcher is also an owner
                     quirkify_hotness(hotness)
                 )));
+
+        // NOTE: Sometimes after pressing a button the image in the embed will disappear.
+        // The image url is still there but the image doesn't exist anymore for some reason.
+        // It might be when the attachment gets updated almost immediately,
+        // maybe it thinks it was uploaded by mistakes and doesn't bother keeping it around.
+        //
+        // I can detect this by checking its width/height, if they are 0, the image is broken.
+        // This will show the image again when it's missing but it doesn't prevent the image from going missing.
+        // ):
+        let should_refetch = match old_image {
+            Some(image) => image.width.unwrap_or_default() == 0,
+            None => true,
+        };
+        if should_refetch {
+            let mut dino_image_path = Path::new(OUTPUT_PATH).join(dino_image_name);
+            if !dino_image_path.exists() {
+                let dino_record =
+                    get_dino_record(&mut transaction, &dino_name)
+                        .await?
+                        .ok_or(anyhow::anyhow!(
+                            "Failed to get record of dino named {dino_name:?}"
+                        ))?;
+                dino_image_path = get_dino_image_path(&dino_record)?;
+            }
+
+            let new_embed =
+                new_embed.attachment(dino_image_path.file_name().unwrap().to_str().unwrap());
+            let response =
+                embed_message(new_embed).add_file(CreateAttachment::path(dino_image_path).await?);
+
+            interaction
+                .create_response(ctx, update_response(response))
+                .await?;
+
+            return Ok(());
+        }
 
         interaction
             .create_response(ctx, update_response(embed_message(new_embed)))
