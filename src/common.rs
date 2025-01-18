@@ -69,7 +69,7 @@ pub async fn user_name(ctx: &Context<'_>, user_id: &str) -> anyhow::Result<Strin
         Ok(uid) => {
             let user = uid.to_user(&ctx).await;
             match user {
-                Ok(u) => Ok(name(&ctx, &u).await),
+                Ok(u) => Ok(name(ctx, &u).await),
                 Err(e) => Err(anyhow!("Unable to find user: {e}")),
             }
         }
