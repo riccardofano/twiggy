@@ -7,6 +7,7 @@
 
 use std::collections::HashSet;
 
+use chrono::{DateTime, Utc};
 use sqlx::{Connection, QueryBuilder, Row, Sqlite, SqliteConnection};
 
 struct DinoTransaction<'a> {
@@ -21,7 +22,7 @@ struct Dino<'a> {
     owner_id: &'a str,
     name: &'a str,
     filename: &'a str,
-    created_at: i64,
+    created_at: Option<DateTime<Utc>>,
     hotness: i64,
     owners: i64,
     body: &'a str,
@@ -119,12 +120,13 @@ async fn main() {
 
         let code: &str = dino_row.get(9);
         let parts: Vec<&str> = code.split(',').collect();
+        let created_at = dino_row.get(7);
         dinos.push(Dino {
             id: dino_id,
             owner_id: owner,
             name: dino_row.get(5),
             filename: dino_row.get(6),
-            created_at: dino_row.get(7),
+            created_at: DateTime::from_timestamp_millis(created_at),
             hotness: dino_row.get(8),
             owners: previous_owners.len() as i64,
             body: parts[0],
