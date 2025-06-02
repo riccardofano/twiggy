@@ -8,7 +8,7 @@
 use std::collections::HashSet;
 
 use chrono::{DateTime, Utc};
-use sqlx::{Connection, QueryBuilder, Row, Sqlite, SqliteConnection};
+use sqlx::{Connection, QueryBuilder, Row, Sqlite, SqliteConnection, Transaction};
 
 struct DinoTransaction<'a> {
     dino_id: i64,
@@ -139,40 +139,63 @@ async fn main() {
     // for example in JS-land a covet would just append the user's id to the coveters string
     // in this version, to uphold the database reference, every transaction has
     // to have a real user related to it.
-    let mut builder: QueryBuilder<Sqlite> = QueryBuilder::new("");
+    let mut builder: QueryBuilder<Sqlite> = QueryBuilder::new("INSERT OR REPLACE INTO DinoUser (id) ");
     if !users.is_empty() {
-        builder.push("INSERT OR REPLACE INTO DinoUser (id) ");
+        builder.push("");
         builder.push_values(users.into_iter(), |mut b, u| { b.push_bind(u); });
         builder.push("; ");
+
+        builder.build().execute(&mut transaction).await.expect("Failed to insert users");
+    }
+    builder.reset();
+
+    // Insert dinos and transactions in chunks because there's a u16::MAX limit
+    // to the number of paramenters a query can have and we can easily exceed that
+    // Users aren't be too numerous and they only need one argument.
+    for chunk in dinos.chunks(1024) {
+        insert_dinos(&mut transaction, chunk).await
     }
 
-    // Adding the dinos
-    if !dinos.is_empty() {
-        builder.push(
-            "INSERT OR REPLACE INTO Dino (id, owner_id, name, filename, created_at, owners, hotness, body, mouth, eyes) "
-        );
-        builder.push_values(dinos.into_iter(), |mut b, d| {
-            b.push_bind(d.id).push_bind(d.owner_id).push_bind(d.name).push_bind(d.filename)
-            .push_bind(d.created_at).push_bind(d.owners).push_bind(d.hotness)
-            .push_bind(d.body).push_bind(d.mouth).push_bind(d.eyes);
-        });
-        builder.push("; ");
-    }
-
-    // Now we can add the transactions.
-    if !transactions.is_empty() {
-        builder.push("INSERT INTO DinoTransactions (dino_id, user_id, gifter_id, type) ");
-        builder.push_values(transactions.into_iter(), |mut b, t| {
-            b.push_bind(t.dino_id).push_bind(t.user_id).push_bind(t.gifter_id).push_bind(t.kind);
-        });
-    }
-
-    if !builder.sql().is_empty() {
-        builder.build()
-            .execute(&mut transaction)
-            .await
-            .expect("Failed to add transactions");
+    for dino_trans in transactions.chunks(1024) {
+        insert_transactions(&mut transaction, dino_trans).await;
     }
 
     transaction.commit().await.expect("Failed to commit transaction");
+}
+
+async fn insert_transactions<'a>(
+    transaction: &mut Transaction<'_, Sqlite>,
+    transactions: &'a [DinoTransaction<'a>],
+) {
+    let mut builder: QueryBuilder<Sqlite> =
+        QueryBuilder::new("INSERT INTO DinoTransactions (dino_id, user_id, gifter_id, type) ");
+    builder.push_values(transactions, |mut b, t| {
+        b.push_bind(t.dino_id)
+            .push_bind(t.user_id)
+            .push_bind(t.gifter_id)
+            .push_bind(t.kind);
+    });
+
+    builder.build().execute(transaction).await.unwrap();
+}
+
+async fn insert_dinos<'a>(transaction: &mut Transaction<'_, Sqlite>, dinos: &'a [Dino<'a>]) {
+    let mut builder: QueryBuilder<Sqlite> =
+        QueryBuilder::new(
+            "INSERT OR REPLACE INTO Dino (id, owner_id, name, filename, created_at, owners, hotness, body, mouth, eyes) "
+        );
+    builder.push_values(dinos, |mut b, d| {
+        b.push_bind(d.id)
+            .push_bind(d.owner_id)
+            .push_bind(d.name)
+            .push_bind(d.filename)
+            .push_bind(d.created_at)
+            .push_bind(d.owners)
+            .push_bind(d.hotness)
+            .push_bind(d.body)
+            .push_bind(d.mouth)
+            .push_bind(d.eyes);
+    });
+
+    builder.build().execute(transaction).await.unwrap();
 }
