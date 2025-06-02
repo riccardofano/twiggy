@@ -21,7 +21,7 @@ struct Dino<'a> {
     owner_id: &'a str,
     name: &'a str,
     filename: &'a str,
-    created_at: &'a str,
+    created_at: i64,
     hotness: i64,
     owners: i64,
     body: &'a str,
@@ -82,17 +82,25 @@ async fn main() {
         let owner: &str = dino_row.get(1);
         users.insert(owner);
 
+        // The first owner is put in the 'previousOwners' list on dino creation
+        // so the current owner is the last previousOwner, no need to do
+        // anything special, we can just use this list
         let previous_owners: &str = dino_row.get(2);
         let previous_owners: Vec<&str> = previous_owners.split(',').collect();
+        for i in 0..(previous_owners.len() - 1) {
+            let previous_owner = previous_owners[i];
+            if previous_owner.is_empty() { break }
 
-        let mut giftee = owner;
-        for i in (1..previous_owners.len()).rev() {
-            let current = previous_owners[i];
-            if current.is_empty() { break }
+            // The previous owners are formatted like <@1234567890>
+            // we don't want the <@ and >
+            let previous_owner = &previous_owner[2..previous_owner.len() - 1];
 
-            users.insert(current);
-            transactions.push(DinoTransaction { dino_id, user_id: giftee, gifter_id: Some(current), kind: "GIFT" });
-            giftee = current;
+            let Some(&receiver) = previous_owners.get(i + 1) else { continue };
+            let receiver = &receiver[2..receiver.len() - 1];
+            // The first owner was already added so just adding the one who received the dino next is enough
+            users.insert(receiver);
+
+            transactions.push(DinoTransaction { dino_id, user_id: receiver, gifter_id: Some(previous_owner), kind: "GIFT" })
         }
 
         let coveters: &str = dino_row.get(3);
@@ -129,31 +137,40 @@ async fn main() {
     // for example in JS-land a covet would just append the user's id to the coveters string
     // in this version, to uphold the database reference, every transaction has
     // to have a real user related to it.
-    let mut builder: QueryBuilder<Sqlite> = QueryBuilder::new(
-        "INSERT OR REPLACE INTO DinoUser (id) "
-    );
-    builder.push_values(users.into_iter(), |mut b, u| { b.push_bind(u); });
+    let mut builder: QueryBuilder<Sqlite> = QueryBuilder::new("");
+    if !users.is_empty() {
+        builder.push("INSERT OR REPLACE INTO DinoUser (id) ");
+        builder.push_values(users.into_iter(), |mut b, u| { b.push_bind(u); });
+        builder.push("; ");
+    }
 
     // Adding the dinos
-    let mut builder: QueryBuilder<Sqlite> = QueryBuilder::new(
-        "; INSERT OR REPLACE INTO Dino (id, owner_id, name, filename, created_at, owners, hotness, body, mouth, eyes) "
-    );
-    builder.push_values(dinos.into_iter(), |mut b, d| {
-        b.push_bind(d.id).push_bind(d.owner_id).push_bind(d.name).push_bind(d.filename)
-        .push_bind(d.created_at).push_bind(d.owners).push_bind(d.hotness)
-        .push_bind(d.body).push_bind(d.mouth).push_bind(d.eyes);
-    });
+    if !dinos.is_empty() {
+        builder.push(
+            "INSERT OR REPLACE INTO Dino (id, owner_id, name, filename, created_at, owners, hotness, body, mouth, eyes) "
+        );
+        builder.push_values(dinos.into_iter(), |mut b, d| {
+            b.push_bind(d.id).push_bind(d.owner_id).push_bind(d.name).push_bind(d.filename)
+            .push_bind(d.created_at).push_bind(d.owners).push_bind(d.hotness)
+            .push_bind(d.body).push_bind(d.mouth).push_bind(d.eyes);
+        });
+        builder.push("; ");
+    }
 
     // Now we can add the transactions.
-    builder.push("; INSERT INTO DinoTransactions (dino_id, user_id, gifter_id, type) ");
-    builder.push_values(transactions.into_iter(), |mut b, t| {
-        b.push_bind(t.dino_id).push_bind(t.user_id).push_bind(t.gifter_id).push_bind(t.kind);
-    });
+    if !transactions.is_empty() {
+        builder.push("INSERT INTO DinoTransactions (dino_id, user_id, gifter_id, type) ");
+        builder.push_values(transactions.into_iter(), |mut b, t| {
+            b.push_bind(t.dino_id).push_bind(t.user_id).push_bind(t.gifter_id).push_bind(t.kind);
+        });
+    }
 
-    builder.build()
-        .execute(&mut transaction)
-        .await
-        .expect("Failed to add transactions");
+    if !builder.sql().is_empty() {
+        builder.build()
+            .execute(&mut transaction)
+            .await
+            .expect("Failed to add transactions");
+    }
 
     transaction.commit().await.expect("Failed to commit transaction");
 }
