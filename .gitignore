@@ -1,6 +1,7 @@
 /.vscode
 /target
 *.sqlite*
+*.db
 .env
 /.idea
 

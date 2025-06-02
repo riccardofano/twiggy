@@ -1,3 +1,10 @@
+// How to use:
+// - Make sure you have a working version of the DB this app uses named "database.sqlite" (the README.md has instructions for it)
+// - Place the database we use in the JS version the root folder (same one as database.sqlite) with the name 'dev.db'
+// - Run this binary with 'cargo r --bin import_js_data'
+//
+// IMPORTANT: This script replaces existing rows with the ones in the JS db, use with caution
+
 use std::collections::HashSet;
 
 use sqlx::{Connection, QueryBuilder, Row, Sqlite, SqliteConnection};
@@ -31,7 +38,7 @@ async fn main() {
     sqlx::query("ATTACH 'dev.db' AS source_db")
         .execute(&mut transaction)
         .await
-        .unwrap();
+        .expect("Could not attach JS db file");
 
     sqlx::query("
         INSERT
