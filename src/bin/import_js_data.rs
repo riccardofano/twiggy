@@ -160,6 +160,13 @@ async fn main() {
         insert_transactions(&mut transaction, dino_trans).await;
     }
 
+    sqlx::query(
+        "INSERT INTO DinoTransactions (dino_id, user_id, type) SELECT dinoId, enjoyerId, 'FAVOURITE' FROM NFDEnthusiasts"
+    )
+    .execute(&mut transaction)
+    .await
+    .expect("Failed to add dino favourites list");
+
     transaction.commit().await.expect("Failed to commit transaction");
 }
 
