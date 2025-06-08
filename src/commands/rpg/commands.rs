@@ -447,9 +447,7 @@ async fn update_stats_draw(
         VALUES ($1, 1, $2, $2, $2), ($3, 1, $4, $4, $4)
         ON CONFLICT(user_id) DO UPDATE SET
         draws = draws + 1,
-        elo_rank = excluded.elo_rank,
-        peak_elo = MAX(peak_elo, excluded.elo_rank),
-        floor_elo = MAX(floor_elo, excluded.elo_rank);"#,
+        elo_rank = excluded.elo_rank;"#,
         challenger_id,
         challenger_elo,
         accepter_id,
@@ -482,16 +480,14 @@ async fn update_stats_win_loss(
         VALUES ($1, 1, $2, $2, $2)
         ON CONFLICT(user_id) DO UPDATE SET
             wins = wins + 1,
-            elo_rank = $2,
-            peak_elo = MAX(peak_elo, $2);
+            elo_rank = $2;
 
         INSERT INTO RPGCharacter (user_id, losses, elo_rank, peak_elo, floor_elo)
         VALUES ($3, 1, $4, $4, $4)
         ON CONFLICT(user_id) DO UPDATE SET
             last_loss = datetime('now'),
             losses = losses + 1,
-            elo_rank = $4,
-            floor_elo = MIN(floor_elo, $4);"#,
+            elo_rank = $4;"#,
         victor_id,
         victor_elo,
         loser_id,
