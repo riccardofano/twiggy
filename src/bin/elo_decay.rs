@@ -54,6 +54,10 @@ async fn balance_economy(
     println!("Decayed tally: {decayed_tally:>6}");
     println!("Elo drift:     {drift:>6}");
 
+    // This part doesn't 100% follow the original,
+    // which would choose N random characters between all players,
+    // instead it picks the absolute bottom/top N characters
+    // which means it specifically targets the super rich and the super poor
     let drift_signum = drift.signum();
     let order_query = match drift_signum {
         -1 => "SELECT user_id, elo_rank FROM RPGCharacter ORDER BY elo_rank DESC LIMIT ?",
