@@ -67,7 +67,8 @@ async fn main() {
         .options(options)
         .setup(|ctx, _ready, framework| {
             Box::pin(async move {
-                // poise::builtins::register_globally(ctx, Vec::new()).await?;
+                // let no_commands: Vec<poise::Command<Data, Error>> = Vec::new();
+                // poise::builtins::register_globally(ctx, &no_commands).await?;
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                 Ok(user_data)
             })
