@@ -29,7 +29,11 @@ pub async fn duel(_ctx: Context<'_>) -> Result<()> {
 
 /// Challenge the chat to a duel
 #[poise::command(slash_command, guild_only)]
-pub async fn challenge(ctx: Context<'_>) -> Result<()> {
+pub async fn challenge(
+    ctx: Context<'_>,
+
+    #[description = "Make this duel mean something"] wager: Option<String>,
+) -> Result<()> {
     let challenger = DuelUser::from(ctx, ctx.author()).await;
 
     if IN_PROGRESS.load(AtomicOrdering::Acquire) {
@@ -40,7 +44,9 @@ pub async fn challenge(ctx: Context<'_>) -> Result<()> {
         return bail_reply(ctx, e.to_string()).await;
     }
 
-    let reply_content = format!("{challenger} is looking for a duel, press the button to accept.");
+    let wager = wager.map(|w| format!("> {w}\n")).unwrap_or_default();
+    let reply_content =
+        format!("{wager}{challenger} is looking for a duel, press the button to accept.");
     let reply_handle = ctx
         .send(reply_with_buttons(
             reply_content,
@@ -50,7 +56,7 @@ pub async fn challenge(ctx: Context<'_>) -> Result<()> {
 
     // Make sure the in_progress status gets updated even on failure
     IN_PROGRESS.store(true, AtomicOrdering::Release);
-    if let Err(e) = run_duel(ctx, challenger, reply_handle).await {
+    if let Err(e) = run_duel(ctx, challenger, reply_handle, wager).await {
         eprintln!("Failed to run duel to completiton: {e:?}");
     }
     IN_PROGRESS.store(false, AtomicOrdering::Release);
@@ -62,6 +68,7 @@ async fn run_duel(
     ctx: Context<'_>,
     challenger: DuelUser,
     reply_handle: ReplyHandle<'_>,
+    wager: String,
 ) -> Result<()> {
     let message = reply_handle.message().await?;
     let opponent = find_opponent(ctx, message.id, challenger.id.get()).await;
@@ -111,7 +118,7 @@ async fn run_duel(
     };
 
     let final_message = format!(
-        "{} has rolled a {accepter_score} and {} has rolled a {challenger_score}. {winner_text}",
+        "{wager}{} has rolled a {accepter_score} and {} has rolled a {challenger_score}. {winner_text}",
         accepter.id.mention(),
         challenger.id.mention()
     );
