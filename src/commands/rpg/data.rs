@@ -31,26 +31,14 @@ impl Stat {
         )
     }
 
-    pub fn get_attack_text(&self) -> String {
-        let mut rng = rand::thread_rng();
-        ATTACK_TEXTS[*self as usize]
-            .choose(&mut rng)
-            .unwrap()
-            .to_string()
+    pub fn get_attack_text<R: rand::Rng>(&self, rng: &mut R) -> &'static str {
+        ATTACK_TEXTS[*self as usize].choose(rng).unwrap()
     }
-    pub fn get_defence_success_text(&self) -> String {
-        let mut rng = rand::thread_rng();
-        DEFENCE_SUCCESS_TEXTS[*self as usize]
-            .choose(&mut rng)
-            .unwrap()
-            .to_string()
+    pub fn get_defence_success_text<R: rand::Rng>(&self, rng: &mut R) -> &'static str {
+        DEFENCE_SUCCESS_TEXTS[*self as usize].choose(rng).unwrap()
     }
-    pub fn get_defence_failure_text(&self) -> String {
-        let mut rng = rand::thread_rng();
-        DEFENCE_FAILURE_TEXTS[*self as usize]
-            .choose(&mut rng)
-            .unwrap()
-            .to_string()
+    pub fn get_defence_failure_text<R: rand::Rng>(&self, rng: &mut R) -> &'static str {
+        DEFENCE_FAILURE_TEXTS[*self as usize].choose(rng).unwrap()
     }
 }
 

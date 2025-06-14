@@ -34,6 +34,7 @@ impl RPGFight {
     }
 
     pub fn fight(&mut self) -> FightOutcome {
+        let mut rng = rand::thread_rng();
         let mut rounds = 0;
 
         while self.challenger.hp > 0 && self.accepter.hp > 0 && rounds < MAX_ROUNDS {
@@ -47,7 +48,7 @@ impl RPGFight {
 
             let mut is_challenger_first = challenger_initiative > accepter_initiative;
             for _ in 0..2 {
-                let is_fight_over = self.play_turn(is_challenger_first);
+                let is_fight_over = self.play_turn(is_challenger_first, &mut rng);
                 if is_fight_over {
                     break;
                 }
@@ -79,7 +80,6 @@ impl RPGFight {
             VictoryKind::Standard.get_texts()
         };
 
-        let mut rng = rand::thread_rng();
         self.summary = result_texts
             .choose(&mut rng)
             .expect("Expected to have at least one result text")
@@ -89,7 +89,7 @@ impl RPGFight {
         result
     }
 
-    fn play_turn(&mut self, challenger_is_attacker: bool) -> bool {
+    fn play_turn<R: rand::Rng>(&mut self, challenger_is_attacker: bool, rng: &mut R) -> bool {
         let (attacker, defender) = if challenger_is_attacker {
             (&mut self.challenger, &mut self.accepter)
         } else {
@@ -108,11 +108,10 @@ impl RPGFight {
             + defender.get_modifier(&defence_stat);
 
         let mut turn_log = String::new();
-
-        turn_log += &attack_stat.get_attack_text();
+        turn_log += attack_stat.get_attack_text(rng);
 
         let damage = if attack_roll >= defence_roll {
-            turn_log += &format!(" {}", defence_stat.get_defence_failure_text());
+            turn_log += &format!(" {}", defence_stat.get_defence_failure_text(rng));
 
             let damage_modifier = match attack_stat {
                 Stat::STR | Stat::DEX | Stat::CON => cmp::max(0, attacker.get_modifier(&Stat::STR)),
@@ -121,7 +120,7 @@ impl RPGFight {
 
             pick_best_x_dice_rolls(10, 1, 1, None) + damage_modifier
         } else {
-            turn_log += &format!(" {}", defence_stat.get_defence_success_text());
+            turn_log += &format!(" {}", defence_stat.get_defence_success_text(rng));
             0
         };
 
