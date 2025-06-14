@@ -61,9 +61,13 @@ const SCISSORS_BTN: &str = "rps-scissors";
 
 /// Challenge someone to a rock paper scissors battle
 #[poise::command(slash_command)]
-pub async fn rps(ctx: Context<'_>) -> Result<()> {
+pub async fn rps(
+    ctx: Context<'_>,
+    #[description = "Make this duel mean something"] wager: Option<String>,
+) -> Result<()> {
     let challenger = ctx.author();
-    let initial_msg = format!("{challenger} is looking for a rock-paper-scissors opponent!");
+    let wager = wager.map(|w| format!("> {w}\n")).unwrap_or_default();
+    let initial_msg = format!("{wager}{challenger} is looking for a rock-paper-scissors opponent!");
     let first_message = ctx
         .send(reply_with_buttons(
             initial_msg,
@@ -107,7 +111,7 @@ pub async fn rps(ctx: Context<'_>) -> Result<()> {
     };
 
     let mut end_msg = format!(
-        "{challenger} picks {}, {accepter} picks {}\n",
+        "{wager}{challenger} picks {}, {accepter} picks {}\n",
         challenger_choice.to_str(),
         accepter_choice.to_str()
     );
