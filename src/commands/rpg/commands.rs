@@ -35,7 +35,10 @@ pub async fn rpg(_ctx: Context<'_>) -> Result<()> {
 
 /// Challenge other chatters and prove your strength.
 #[poise::command(slash_command, guild_only)]
-async fn challenge(ctx: Context<'_>) -> Result<()> {
+async fn challenge(
+    ctx: Context<'_>,
+    #[description = "Make this challenge mean something"] wager: Option<String>,
+) -> Result<()> {
     if IN_PROGRESS.load(Ordering::Acquire) {
         return bail_reply(ctx, "A RPG fight is already in progress").await;
     }
@@ -54,8 +57,9 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
     let challenger_character =
         Character::new(challenger, challenger_nick.as_deref(), challenger_stats);
 
+    let wager = wager.map(|w| format!("> {w}\n")).unwrap_or_default();
     let reply_content = format!(
-        "{} is throwing down the gauntlet in challenge...",
+        "{wager}{} is throwing down the gauntlet in challenge...",
         challenger_character.name
     );
     let reply_handle = ctx
@@ -66,7 +70,7 @@ async fn challenge(ctx: Context<'_>) -> Result<()> {
         .await?;
 
     IN_PROGRESS.store(true, Ordering::Release);
-    if let Err(e) = run_duel(ctx, challenger_character, reply_handle).await {
+    if let Err(e) = run_duel(ctx, challenger_character, reply_handle, wager).await {
         eprintln!("Failed to run duel to completion: {e:?}");
     }
     IN_PROGRESS.store(false, Ordering::Release);
@@ -78,6 +82,7 @@ async fn run_duel(
     ctx: Context<'_>,
     challenger_character: Character,
     reply_handle: ReplyHandle<'_>,
+    wager: String,
 ) -> Result<()> {
     let message = reply_handle.message().await?;
 
@@ -122,7 +127,7 @@ async fn run_duel(
         calculate_lp_difference(fight.accepter.record.elo_rank, accepter_elo)
     );
 
-    let final_message = format!("{}\n{}", fight.summary(), elo_change_summary);
+    let final_message = format!("{wager}{}\n{}", fight.summary(), elo_change_summary);
     let update_resp =
         update_response(text_message(final_message).components(vec![create_summary_button()]));
     interaction.create_response(ctx, update_resp).await?;
