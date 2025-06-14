@@ -17,12 +17,10 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::OnceLock;
 
+use crate::common::{avatar_url, ephemeral_reply, name as get_name, pick_best_x_dice_rolls};
 use crate::common::{bail_reply, embed_message, ephemeral_text_message, response};
-use crate::config::{DINO_GIFTING_COOLDOWN, DINO_SLURP_COOLDOWN};
-use crate::{
-    common::{avatar_url, ephemeral_reply, name as get_name, pick_best_x_dice_rolls},
-    Context, Result, SUB_ROLE_ID,
-};
+use crate::config::{DINO_GIFTING_COOLDOWN, DINO_SLURP_COOLDOWN, SUB_ROLE};
+use crate::{Context, Result};
 
 // TODO: Use DateTime<Utc> instead of NaiveDateTime for database times
 
@@ -1341,7 +1339,7 @@ async fn roll_to_hatch(ctx: Context<'_>) -> Result<i64> {
     let mut hatch_roll = pick_best_x_dice_rolls(4, 1, 1, None) as i64;
 
     if let Some(guild_id) = ctx.guild_id() {
-        if ctx.author().has_role(ctx, guild_id, SUB_ROLE_ID).await? {
+        if ctx.author().has_role(ctx, guild_id, SUB_ROLE).await? {
             hatch_roll = hatch_roll.max(pick_best_x_dice_rolls(4, 1, 1, None) as i64);
         }
     }

@@ -19,8 +19,6 @@ pub struct Data {
 pub type Context<'a> = poise::Context<'a, Data, anyhow::Error>;
 pub type Error = anyhow::Error;
 
-pub const SUB_ROLE_ID: u64 = 930791790490030100;
-
 #[tokio::main]
 async fn main() {
     let token = std::env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN");
