@@ -22,7 +22,7 @@ struct Dino<'a> {
     owner_id: &'a str,
     name: &'a str,
     filename: &'a str,
-    created_at: Option<DateTime<Utc>>,
+    created_at: DateTime<Utc>,
     hotness: i64,
     owners: i64,
     body: &'a str,
@@ -44,7 +44,7 @@ async fn main() {
     sqlx::query("
         INSERT
         OR REPLACE INTO User (id, fav_color, last_random, last_loss)
-        SELECT id, favColor, lastRandom, lastLoss
+        SELECT id, favColor, DATETIME(lastRandom / 1000, 'unixepoch'), DATETIME(lastLoss / 1000, 'unixepoch')
         FROM source_db.User;
 
         INSERT OR REPLACE INTO DuelStats ( user_id, losses, wins, draws, win_streak, loss_streak, win_streak_max, loss_streak_max )
@@ -56,11 +56,11 @@ async fn main() {
         FROM source_db.BestMixu;
 
         INSERT OR REPLACE INTO RPGCharacter ( user_id, losses, wins, draws, last_loss, elo_rank, peak_elo, floor_elo )
-        SELECT id, wins, losses, draws, lastLoss, eloRank, peakElo, floorElo
+        SELECT id, wins, losses, draws, DATETIME(lastLoss / 1000, 'unixepoch'), eloRank, peakElo, floorElo
         FROM source_db.RPGCharacter;
 
         INSERT OR REPLACE INTO DinoUser (id, last_hatch, last_gifting, last_slurp, consecutive_fails)
-        SELECT id, lastMint, lastGiftGiven, lastSlurp, consecutiveFails
+        SELECT id, DATETIME(lastMint / 1000, 'unixepoch'), DATETIME(lastGiftGiven / 1000, 'unixepoch'), DATETIME(lastSlurp / 1000, 'unixepoch'), consecutiveFails
         FROM source_db.NFDEnjoyer;
         ")
         .execute(&mut transaction)
@@ -68,7 +68,7 @@ async fn main() {
         .unwrap();
 
     let dino_rows = sqlx::query(
-        "SELECT id, owner, previousOwners, coveters, shunners, name, filename, mintDate, hotness, code FROM source_db.NFDItem",
+        "SELECT id, owner, previousOwners, coveters, shunners, name, filename, DATETIME(mintDate / 1000, 'unixepoch'), hotness, code FROM source_db.NFDItem",
     )
     .fetch_all(&mut transaction)
     .await
@@ -120,13 +120,12 @@ async fn main() {
 
         let code: &str = dino_row.get(9);
         let parts: Vec<&str> = code.split(',').collect();
-        let created_at = dino_row.get(7);
         dinos.push(Dino {
             id: dino_id,
             owner_id: owner,
             name: dino_row.get(5),
             filename: dino_row.get(6),
-            created_at: DateTime::from_timestamp_millis(created_at),
+            created_at: dino_row.get(7),
             hotness: dino_row.get(8),
             owners: previous_owners.len() as i64,
             body: parts[0],
